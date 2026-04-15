@@ -1,7 +1,7 @@
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator, Alert, FlatList, Platform, StyleSheet,
+  ActivityIndicator, FlatList, Platform, StyleSheet,
   Text, TextInput, TouchableOpacity, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,6 +21,7 @@ export default function AdminHome() {
   const [newCity, setNewCity] = useState("");
   const [newPrice, setNewPrice] = useState("");
   const [savingPrice, setSavingPrice] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([refreshAdminData(), refreshPricing()]).then(() => setLoading(false));
@@ -48,10 +49,12 @@ export default function AdminHome() {
   };
 
   const handleDeletePrice = (rule: PriceRule) => {
-    Alert.alert("Remover preço", `Remover preço de "${rule.destination}"?`, [
-      { text: "Cancelar", style: "cancel" },
-      { text: "Remover", style: "destructive", onPress: () => deletePricingRule(rule.id) },
-    ]);
+    setPendingDeleteId(rule.id);
+  };
+
+  const confirmDeletePrice = async (id: string) => {
+    setPendingDeleteId(null);
+    await deletePricingRule(id);
   };
 
   const activeRides = allRides.filter((r) => ["waiting", "accepted", "in_progress"].includes(r.status));
@@ -146,6 +149,11 @@ export default function AdminHome() {
       width: 36, height: 36, borderRadius: 18, backgroundColor: colors.destructive + "22",
       alignItems: "center", justifyContent: "center",
     },
+    confirmBtn: {
+      paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
+      flexDirection: "row", alignItems: "center", gap: 4,
+    },
+    confirmBtnText: { fontSize: 12, fontWeight: "700", color: "#fff", fontFamily: "Inter_700Bold" },
     pricingHint: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginBottom: 16, lineHeight: 18 },
   });
 
@@ -250,10 +258,30 @@ export default function AdminHome() {
               <View style={{ flex: 1 }}>
                 <Text style={s.cityName}>{item.destination}</Text>
               </View>
-              <Text style={s.priceValue}>R$ {item.price.toFixed(2).replace(".", ",")}</Text>
-              <TouchableOpacity style={s.deleteBtn} onPress={() => handleDeletePrice(item)}>
-                <Feather name="trash-2" size={16} color={colors.destructive} />
-              </TouchableOpacity>
+              {pendingDeleteId === item.id ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <TouchableOpacity
+                    style={[s.confirmBtn, { backgroundColor: colors.destructive }]}
+                    onPress={() => confirmDeletePrice(item.id)}
+                  >
+                    <Feather name="check" size={13} color="#fff" />
+                    <Text style={s.confirmBtnText}>Remover</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[s.confirmBtn, { backgroundColor: colors.muted }]}
+                    onPress={() => setPendingDeleteId(null)}
+                  >
+                    <Text style={[s.confirmBtnText, { color: colors.mutedForeground }]}>Cancelar</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <>
+                  <Text style={s.priceValue}>R$ {item.price.toFixed(2).replace(".", ",")}</Text>
+                  <TouchableOpacity style={s.deleteBtn} onPress={() => handleDeletePrice(item)}>
+                    <Feather name="trash-2" size={16} color={colors.destructive} />
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
           )}
           ListEmptyComponent={
