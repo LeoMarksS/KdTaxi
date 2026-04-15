@@ -1,11 +1,11 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-import React, { useRef, useState } from "react";
+import { useFocusEffect } from "expo-router";
+import React, { useCallback, useRef, useState } from "react";
 import {
   FlatList,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
+import { UserAvatar } from "@/components/UserAvatar";
 import type { ChatMessage } from "@/context/AppContext";
 
 function Message({ msg, isMe }: { msg: ChatMessage; isMe: boolean }) {
@@ -27,9 +28,11 @@ function Message({ msg, isMe }: { msg: ChatMessage; isMe: boolean }) {
       flexDirection: isMe ? "row-reverse" : "row",
       marginBottom: 12,
       paddingHorizontal: 16,
+      alignItems: "flex-end",
+      gap: 8,
     },
     bubble: {
-      maxWidth: "75%",
+      maxWidth: "72%",
       paddingHorizontal: 14,
       paddingVertical: 10,
       borderRadius: 18,
@@ -65,11 +68,17 @@ function Message({ msg, isMe }: { msg: ChatMessage; isMe: boolean }) {
 
   return (
     <View style={s.wrapper}>
+      {!isMe && (
+        <UserAvatar name={msg.senderName} photo={msg.senderPhoto} size={30} mode="client" />
+      )}
       <View style={s.bubble}>
         {!isMe && <Text style={s.senderName}>{msg.senderName}</Text>}
         <Text style={s.text}>{msg.text}</Text>
         <Text style={s.time}>{time}</Text>
       </View>
+      {isMe && (
+        <UserAvatar name={msg.senderName} photo={msg.senderPhoto} size={30} mode="driver" />
+      )}
     </View>
   );
 }
@@ -77,9 +86,17 @@ function Message({ msg, isMe }: { msg: ChatMessage; isMe: boolean }) {
 export default function ChatScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, chatMessages, sendChatMessage, activeRide } = useApp();
+  const { user, chatMessages, sendChatMessage, activeRide, markChatRead } = useApp();
   const [text, setText] = useState("");
   const flatRef = useRef<FlatList>(null);
+
+  // Mark all messages as read when this screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      markChatRead();
+      return () => {};
+    }, [markChatRead])
+  );
 
   const handleSend = () => {
     if (!text.trim()) return;
@@ -96,11 +113,12 @@ export default function ChatScreen() {
       paddingBottom: 14,
       flexDirection: "row",
       alignItems: "center",
-      gap: 14,
+      gap: 12,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
     },
     backBtn: { padding: 4 },
+    headerAvatar: { marginRight: 2 },
     headerInfo: { flex: 1 },
     headerTitle: { fontSize: 17, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold" },
     headerSub: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
@@ -141,8 +159,9 @@ export default function ChatScreen() {
     },
   });
 
-  const otherPerson =
-    user?.mode === "client" ? activeRide?.driverName : activeRide?.clientName;
+  const otherPerson = user?.mode === "client" ? activeRide?.driverName : activeRide?.clientName;
+  const otherPhoto = user?.mode === "client" ? activeRide?.driverPhoto : activeRide?.clientPhoto;
+  const otherMode = user?.mode === "client" ? "driver" : "client";
 
   return (
     <View style={s.container}>
@@ -150,6 +169,11 @@ export default function ChatScreen() {
         <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
           <Feather name="chevron-left" size={26} color={colors.foreground} />
         </TouchableOpacity>
+        {otherPerson && (
+          <View style={s.headerAvatar}>
+            <UserAvatar name={otherPerson} photo={otherPhoto} size={36} mode={otherMode} />
+          </View>
+        )}
         <View style={s.headerInfo}>
           <Text style={s.headerTitle}>{otherPerson ?? "Chat"}</Text>
           <Text style={s.headerSub}>

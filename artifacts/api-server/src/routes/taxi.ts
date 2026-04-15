@@ -249,6 +249,15 @@ router.get("/rides", (_req: Request, res: Response) => {
   ));
 });
 
+// GET /users/:id/rides
+router.get("/users/:id/rides", (req: Request, res: Response) => {
+  const userId = req.params.id!;
+  const userRides = Array.from(rides.values())
+    .filter((r) => (r.clientId === userId || r.driverId === userId) && r.status === "finished")
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  res.json(userRides);
+});
+
 // GET /pricing
 router.get("/pricing", (_req: Request, res: Response) => {
   res.json(Array.from(pricing.values()).sort((a, b) => a.destination.localeCompare(b.destination)));

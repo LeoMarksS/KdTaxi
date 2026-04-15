@@ -55,6 +55,7 @@ export interface ChatMessage {
   rideId: string;
   senderId: string;
   senderName: string;
+  senderPhoto?: string;
   text: string;
   timestamp: string;
 }
@@ -76,6 +77,8 @@ interface AppContextValue {
   pendingRides: Ride[];
   chatMessages: ChatMessage[];
   sendChatMessage: (text: string) => void;
+  unreadChatCount: number;
+  markChatRead: () => void;
   socket: Socket | null;
   requestRide: (origin: string, destination: string, payment: "pix" | "dinheiro") => Promise<Ride | null>;
   acceptRide: (rideId: string) => Promise<void>;
@@ -87,6 +90,8 @@ interface AppContextValue {
   allRides: Ride[];
   allUsers: User[];
   pricing: PriceRule[];
+  myRides: Ride[];
+  fetchMyRides: () => Promise<void>;
   refreshAdminData: () => Promise<void>;
   refreshPricing: () => Promise<void>;
   setPricingRule: (destination: string, price: number) => Promise<void>;
@@ -131,11 +136,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [activeRide, setActiveRide] = useState<Ride | null>(null);
   const [pendingRides, setPendingRides] = useState<Ride[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [allRides, setAllRides] = useState<Ride[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [pricing, setPricing] = useState<PriceRule[]>([]);
+  const [myRides, setMyRides] = useState<Ride[]>([]);
   const [finishedRideToRate, setFinishedRideToRate] = useState<Ride | null>(null);
   const socketRef = useRef<Socket | null>(null);
+  const userRef = useRef<User | null>(null);
+
+  // Keep userRef in sync so socket handlers can access latest user
+  useEffect(() => { userRef.current = user; }, [user]);
 
   // Load persisted state
   useEffect(() => {
@@ -211,13 +222,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     socketRef.current = socket;
 
     socket.on("nova_corrida", (ride: Ride) => {
-      if (user.mode === "driver") {
+      if (userRef.current?.mode === "driver") {
         setPendingRides((prev) => {
           const exists = prev.find((r) => r.id === ride.id);
           if (exists) return prev;
           return [ride, ...prev];
         });
-        // In-app notification for driver
         Notifications.scheduleNotificationAsync({
           content: {
             title: "Nova corrida!",
@@ -232,7 +242,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     socket.on("corrida_aceita", (ride: Ride) => {
       setActiveRide(ride);
       setPendingRides((prev) => prev.filter((r) => r.id !== ride.id));
-      if (user.mode === "client") {
+      if (userRef.current?.mode === "client") {
         Notifications.scheduleNotificationAsync({
           content: { title: "Motorista encontrado!", body: `${ride.driverName} está a caminho`, sound: true },
           trigger: null,
@@ -243,6 +253,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     socket.on("corrida_finalizada", (ride: Ride) => {
       setActiveRide(null);
       setFinishedRideToRate(ride);
+      setMyRides((prev) => [ride, ...prev.filter((r) => r.id !== ride.id)]);
       Notifications.scheduleNotificationAsync({
         content: { title: "Corrida finalizada!", body: "Avalie sua experiência", sound: true },
         trigger: null,
@@ -256,10 +267,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     socket.on("mensagem_chat", (msg: ChatMessage) => {
       setChatMessages((prev) => [...prev, msg]);
-      Notifications.scheduleNotificationAsync({
-        content: { title: `Mensagem de ${msg.senderName}`, body: msg.text, sound: true },
-        trigger: null,
-      }).catch(() => {});
+      // Increment unread count only for messages from others
+      if (msg.senderId !== userRef.current?.id) {
+        setUnreadChatCount((c) => c + 1);
+        Notifications.scheduleNotificationAsync({
+          content: { title: `Mensagem de ${msg.senderName}`, body: msg.text, sound: true },
+          trigger: null,
+        }).catch(() => {});
+      }
     });
 
     return () => {
@@ -312,6 +327,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const ride: Ride = await res.json();
       setActiveRide(null);
       setFinishedRideToRate(ride);
+      setMyRides((prev) => [ride, ...prev.filter((r) => r.id !== ride.id)]);
       setChatMessages([]);
     }
   }, []);
@@ -343,6 +359,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       rideId: activeRide.id,
       senderId: user.id,
       senderName: user.name,
+      senderPhoto: user.photo,
       text,
       timestamp: new Date().toISOString(),
     };
@@ -350,11 +367,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setChatMessages((prev) => [...prev, msg]);
   }, [user, activeRide]);
 
+  const markChatRead = useCallback(() => {
+    setUnreadChatCount(0);
+  }, []);
+
   const logout = useCallback(() => {
     setUser(null);
     setActiveRide(null);
     setPendingRides([]);
     setChatMessages([]);
+    setMyRides([]);
+    setUnreadChatCount(0);
     setFinishedRideToRate(null);
     setDriverOnlineState(false);
     AsyncStorage.multiRemove(["kd_driver_online", "kd_active_ride"]);
@@ -368,6 +391,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (ridesRes.ok) setAllRides(await ridesRes.json());
     if (usersRes.ok) setAllUsers(await usersRes.json());
   }, []);
+
+  const fetchMyRides = useCallback(async () => {
+    if (!user) return;
+    try {
+      const res = await fetch(`${API_BASE}/users/${user.id}/rides`);
+      if (res.ok) setMyRides(await res.json());
+    } catch {}
+  }, [user]);
 
   const refreshPricing = useCallback(async () => {
     const res = await fetch(`${API_BASE}/pricing`);
@@ -402,9 +433,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       isDriverOnline, setDriverOnline,
       activeRide, setActiveRide,
       pendingRides, chatMessages, sendChatMessage,
+      unreadChatCount, markChatRead,
       socket: socketRef.current,
       requestRide, acceptRide, declineRide, finishRide, cancelRide, rateRide,
       logout, allRides, allUsers, pricing,
+      myRides, fetchMyRides,
       refreshAdminData, refreshPricing, setPricingRule, deletePricingRule, lookupPrice,
       finishedRideToRate, clearFinishedRideToRate: () => setFinishedRideToRate(null),
     }}>

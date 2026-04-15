@@ -32,7 +32,10 @@ import { RatingModal } from "@/components/RatingModal";
 export default function ClientHome() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, activeRide, requestRide, cancelRide, logout, lookupPrice, finishedRideToRate } = useApp();
+  const {
+    user, activeRide, requestRide, cancelRide, logout, lookupPrice,
+    finishedRideToRate, unreadChatCount, myRides, fetchMyRides,
+  } = useApp();
 
   const [origin, setOrigin] = useState("");
   const [destination, setDestination] = useState("");
@@ -40,8 +43,14 @@ export default function ClientHome() {
   const [loading, setLoading] = useState(false);
   const [price, setPrice] = useState<number | null>(null);
   const [priceLookingUp, setPriceLookingUp] = useState(false);
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   const pulseScale = useSharedValue(1);
+
+  useEffect(() => {
+    fetchMyRides();
+  }, []);
 
   useEffect(() => {
     if (activeRide?.status === "waiting") {
@@ -53,6 +62,11 @@ export default function ClientHome() {
       pulseScale.value = withSpring(1);
     }
   }, [activeRide?.status]);
+
+  // Reset cancel confirmation when ride changes
+  useEffect(() => {
+    setConfirmingCancel(false);
+  }, [activeRide?.id]);
 
   const pulseStyle = useAnimatedStyle(() => ({ transform: [{ scale: pulseScale.value }] }));
 
@@ -77,9 +91,13 @@ export default function ClientHome() {
 
   const handleCancel = async () => {
     if (!activeRide) return;
+    if (!confirmingCancel) { setConfirmingCancel(true); return; }
+    setConfirmingCancel(false);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     await cancelRide(activeRide.id);
   };
+
+  const totalSpent = myRides.reduce((sum, r) => sum + (r.price ?? 0), 0);
 
   const statusConfig = {
     waiting: { label: "Procurando motorista...", color: colors.statusWaiting, icon: "clock" as const },
@@ -163,22 +181,64 @@ export default function ClientHome() {
     driverSub: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
     driverRating: { fontSize: 12, color: colors.primary, fontFamily: "Inter_600SemiBold", marginTop: 2 },
     actionRow: { flexDirection: "row", gap: 12, marginTop: 16 },
+    chatBtnWrap: { flex: 1, position: "relative" },
     chatBtn: {
       flex: 1, backgroundColor: colors.primary, borderRadius: 14, paddingVertical: 14,
       alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8,
     },
     chatBtnText: { fontSize: 15, fontWeight: "700", color: "#000", fontFamily: "Inter_700Bold" },
+    chatBadge: {
+      position: "absolute", top: -6, right: -6,
+      backgroundColor: colors.destructive, borderRadius: 10,
+      minWidth: 20, height: 20, alignItems: "center", justifyContent: "center", paddingHorizontal: 4,
+      zIndex: 10,
+    },
+    chatBadgeText: { fontSize: 11, color: "#fff", fontWeight: "700", fontFamily: "Inter_700Bold" },
     cancelBtn: {
       flex: 1, backgroundColor: colors.muted, borderRadius: 14, paddingVertical: 14,
       alignItems: "center", borderWidth: 1, borderColor: colors.border,
     },
     cancelBtnText: { fontSize: 15, fontWeight: "600", color: colors.mutedForeground, fontFamily: "Inter_500Medium" },
+    cancelBtnConfirm: {
+      flex: 1, backgroundColor: colors.destructive + "22", borderRadius: 14, paddingVertical: 14,
+      alignItems: "center", borderWidth: 1, borderColor: colors.destructive,
+    },
+    cancelBtnConfirmText: { fontSize: 15, fontWeight: "700", color: colors.destructive, fontFamily: "Inter_700Bold" },
+    cancelBackBtn: {
+      flex: 1, backgroundColor: colors.muted, borderRadius: 14, paddingVertical: 14,
+      alignItems: "center", borderWidth: 1, borderColor: colors.border,
+    },
+    cancelBackText: { fontSize: 14, fontWeight: "500", color: colors.mutedForeground, fontFamily: "Inter_500Medium" },
     paymentInfoBadge: {
       flexDirection: "row", alignItems: "center", gap: 6,
       backgroundColor: colors.muted, borderRadius: 8,
       paddingHorizontal: 10, paddingVertical: 6, marginTop: 4, alignSelf: "flex-start",
     },
     paymentInfoText: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_500Medium" },
+    historyToggle: {
+      flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+      backgroundColor: colors.card, borderRadius: colors.radius,
+      padding: 16, marginBottom: 12, borderWidth: 1, borderColor: colors.border,
+    },
+    historyTitle: { fontSize: 15, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold" },
+    historySubtitle: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
+    historyCard: {
+      backgroundColor: colors.card, borderRadius: 12,
+      padding: 14, marginBottom: 8, borderWidth: 1, borderColor: colors.border,
+    },
+    historyRoute: { fontSize: 13, color: colors.foreground, fontFamily: "Inter_400Regular", marginBottom: 4 },
+    historyMeta: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+    historyDate: { fontSize: 11, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
+    historyAmount: { fontSize: 15, fontWeight: "700", color: colors.destructive, fontFamily: "Inter_700Bold" },
+    historyAmountNone: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
+    historyDriver: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginBottom: 4 },
+    totalCard: {
+      backgroundColor: colors.destructive + "18", borderRadius: 12, padding: 14,
+      flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12,
+      borderWidth: 1, borderColor: colors.destructive + "44",
+    },
+    totalLabel: { fontSize: 13, color: colors.destructive, fontFamily: "Inter_600SemiBold" },
+    totalValue: { fontSize: 20, fontWeight: "900", color: colors.destructive, fontFamily: "Inter_700Bold" },
   });
 
   return (
@@ -302,6 +362,42 @@ export default function ClientHome() {
                   )}
                 </TouchableOpacity>
               </View>
+
+              {myRides.length > 0 && (
+                <View>
+                  <TouchableOpacity style={s.historyToggle} onPress={() => setShowHistory((v) => !v)}>
+                    <View>
+                      <Text style={s.historyTitle}>Minhas corridas</Text>
+                      <Text style={s.historySubtitle}>{myRides.length} corrida{myRides.length !== 1 ? "s" : ""} concluída{myRides.length !== 1 ? "s" : ""}</Text>
+                    </View>
+                    <Feather name={showHistory ? "chevron-up" : "chevron-down"} size={20} color={colors.mutedForeground} />
+                  </TouchableOpacity>
+                  {showHistory && (
+                    <View>
+                      <View style={s.totalCard}>
+                        <Text style={s.totalLabel}>Total gasto</Text>
+                        <Text style={s.totalValue}>R$ {totalSpent.toFixed(2).replace(".", ",")}</Text>
+                      </View>
+                      {myRides.map((ride) => (
+                        <View key={ride.id} style={s.historyCard}>
+                          {ride.driverName && <Text style={s.historyDriver}>Motorista: {ride.driverName}</Text>}
+                          <Text style={s.historyRoute}>{ride.origin} → {ride.destination}</Text>
+                          <View style={s.historyMeta}>
+                            <Text style={s.historyDate}>
+                              {new Date(ride.createdAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                            </Text>
+                            {ride.price !== undefined ? (
+                              <Text style={s.historyAmount}>R$ {ride.price.toFixed(2).replace(".", ",")}</Text>
+                            ) : (
+                              <Text style={s.historyAmountNone}>Sem valor</Text>
+                            )}
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              )}
             </>
           ) : (
             <View style={s.statusCard}>
@@ -357,16 +453,36 @@ export default function ClientHome() {
 
               <View style={s.actionRow}>
                 {(activeRide.status === "accepted" || activeRide.status === "in_progress") && (
-                  <TouchableOpacity style={s.chatBtn} onPress={() => router.push("/chat")}>
-                    <Feather name="message-circle" size={18} color="#000" />
-                    <Text style={s.chatBtnText}>Chat</Text>
-                  </TouchableOpacity>
+                  <View style={s.chatBtnWrap}>
+                    <TouchableOpacity style={s.chatBtn} onPress={() => router.push("/chat")}>
+                      <Feather name="message-circle" size={18} color="#000" />
+                      <Text style={s.chatBtnText}>Chat</Text>
+                    </TouchableOpacity>
+                    {unreadChatCount > 0 && (
+                      <View style={s.chatBadge}>
+                        <Text style={s.chatBadgeText}>{unreadChatCount > 99 ? "99+" : unreadChatCount}</Text>
+                      </View>
+                    )}
+                  </View>
                 )}
+
                 {(activeRide.status === "waiting" || activeRide.status === "accepted") && (
-                  <TouchableOpacity style={s.cancelBtn} onPress={handleCancel}>
-                    <Text style={s.cancelBtnText}>Cancelar</Text>
-                  </TouchableOpacity>
+                  confirmingCancel ? (
+                    <>
+                      <TouchableOpacity style={s.cancelBtnConfirm} onPress={handleCancel}>
+                        <Text style={s.cancelBtnConfirmText}>Confirmar cancelamento</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={s.cancelBackBtn} onPress={() => setConfirmingCancel(false)}>
+                        <Text style={s.cancelBackText}>Voltar</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <TouchableOpacity style={s.cancelBtn} onPress={handleCancel}>
+                      <Text style={s.cancelBtnText}>Cancelar</Text>
+                    </TouchableOpacity>
+                  )
                 )}
+
                 {activeRide.status === "finished" && (
                   <TouchableOpacity style={[s.confirmBtn, { flex: 1 }]} onPress={() => router.replace("/(tabs)")}>
                     <Text style={s.confirmBtnText}>Nova corrida</Text>

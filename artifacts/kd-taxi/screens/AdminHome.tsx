@@ -8,9 +8,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
+import { UserAvatar } from "@/components/UserAvatar";
 import type { PriceRule, Ride } from "@/context/AppContext";
 
-type Tab = "rides" | "users" | "pricing";
+type Tab = "rides" | "passengers" | "drivers" | "pricing";
 
 export default function AdminHome() {
   const colors = useColors();
@@ -58,6 +59,7 @@ export default function AdminHome() {
   };
 
   const activeRides = allRides.filter((r) => ["waiting", "accepted", "in_progress"].includes(r.status));
+  const passengers = allUsers.filter((u) => u.mode === "client");
   const drivers = allUsers.filter((u) => u.mode === "driver");
 
   const s = StyleSheet.create({
@@ -76,12 +78,12 @@ export default function AdminHome() {
     },
     statNum: { fontSize: 24, fontWeight: "900", color: colors.foreground, fontFamily: "Inter_700Bold" },
     statLabel: { fontSize: 11, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2 },
-    tabs: { flexDirection: "row", paddingHorizontal: 24, gap: 8, marginBottom: 16 },
+    tabs: { flexDirection: "row", paddingHorizontal: 24, gap: 6, marginBottom: 16 },
     tabBtn: {
-      flex: 1, paddingVertical: 11, borderRadius: 12,
-      alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 6,
+      flex: 1, paddingVertical: 10, borderRadius: 12,
+      alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 5,
     },
-    tabText: { fontSize: 12, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
+    tabText: { fontSize: 11, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
     list: { flex: 1, paddingHorizontal: 24 },
     card: {
       backgroundColor: colors.card, borderRadius: colors.radius,
@@ -101,17 +103,20 @@ export default function AdminHome() {
     userCard: {
       backgroundColor: colors.card, borderRadius: colors.radius, padding: 16,
       marginBottom: 10, borderWidth: 1, borderColor: colors.border,
-      flexDirection: "row", alignItems: "center",
+      flexDirection: "row", alignItems: "center", gap: 14,
     },
-    avatar: {
-      width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primary,
-      alignItems: "center", justifyContent: "center", marginRight: 14,
-    },
+    userInfo: { flex: 1 },
     userName: { fontSize: 16, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold" },
-    userPhone: { fontSize: 13, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
-    userModeRating: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 2 },
-    userMode: { fontSize: 12, color: colors.primary, fontFamily: "Inter_600SemiBold" },
-    userRating: { fontSize: 12, color: colors.statusWaiting, fontFamily: "Inter_600SemiBold" },
+    userPhone: { fontSize: 13, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2 },
+    userRatingRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 },
+    userRatingBadge: {
+      flexDirection: "row", alignItems: "center", gap: 4,
+      backgroundColor: colors.primary + "22", borderRadius: 8,
+      paddingHorizontal: 8, paddingVertical: 3,
+    },
+    userRatingText: { fontSize: 13, fontWeight: "700", color: colors.primary, fontFamily: "Inter_700Bold" },
+    userRideCount: { fontSize: 11, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
+    noRating: { fontSize: 11, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 4 },
     empty: { alignItems: "center", paddingVertical: 48, gap: 12 },
     emptyText: { fontSize: 15, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
 
@@ -155,13 +160,39 @@ export default function AdminHome() {
     },
     confirmBtnText: { fontSize: 12, fontWeight: "700", color: "#fff", fontFamily: "Inter_700Bold" },
     pricingHint: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginBottom: 16, lineHeight: 18 },
+    sectionHeader: {
+      fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_500Medium",
+      letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 10, marginTop: 4,
+    },
   });
 
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: "rides", label: "Corridas", icon: "car" },
-    { id: "users", label: "Usuários", icon: "users" },
+    { id: "passengers", label: "Passag.", icon: "user" },
+    { id: "drivers", label: "Motoristas", icon: "truck" },
     { id: "pricing", label: "Preços", icon: "dollar-sign" },
   ];
+
+  const renderUserCard = (item: typeof allUsers[number]) => (
+    <View style={s.userCard} key={item.id}>
+      <UserAvatar name={item.name} size={46} mode={item.mode as any} />
+      <View style={s.userInfo}>
+        <Text style={s.userName}>{item.name}</Text>
+        <Text style={s.userPhone}>{item.phone}</Text>
+        {(item as any).rating > 0 ? (
+          <View style={s.userRatingRow}>
+            <View style={s.userRatingBadge}>
+              <Feather name="star" size={12} color={colors.primary} />
+              <Text style={s.userRatingText}>{(item as any).rating.toFixed(1)}</Text>
+            </View>
+            <Text style={s.userRideCount}>{(item as any).rideCount} corrida{(item as any).rideCount !== 1 ? "s" : ""}</Text>
+          </View>
+        ) : (
+          <Text style={s.noRating}>Sem avaliações ainda</Text>
+        )}
+      </View>
+    </View>
+  );
 
   return (
     <View style={s.container}>
@@ -185,8 +216,8 @@ export default function AdminHome() {
           <Text style={s.statLabel}>Motoristas</Text>
         </View>
         <View style={s.statCard}>
-          <Text style={[s.statNum, { color: colors.primary }]}>{pricing.length}</Text>
-          <Text style={s.statLabel}>Destinos</Text>
+          <Text style={[s.statNum, { color: colors.primary }]}>{passengers.length}</Text>
+          <Text style={s.statLabel}>Passag.</Text>
         </View>
         <View style={s.statCard}>
           <Text style={[s.statNum, { color: colors.statusInProgress }]}>{allRides.length}</Text>
@@ -201,7 +232,7 @@ export default function AdminHome() {
             style={[s.tabBtn, { backgroundColor: tab === t.id ? colors.primary : colors.card }]}
             onPress={() => setTab(t.id)}
           >
-            <Feather name={t.icon as any} size={14} color={tab === t.id ? "#000" : colors.mutedForeground} />
+            <Feather name={t.icon as any} size={13} color={tab === t.id ? "#000" : colors.mutedForeground} />
             <Text style={[s.tabText, { color: tab === t.id ? "#000" : colors.mutedForeground }]}>{t.label}</Text>
           </TouchableOpacity>
         ))}
@@ -339,38 +370,41 @@ export default function AdminHome() {
             </View>
           }
         />
+      ) : tab === "passengers" ? (
+        <FlatList
+          style={s.list}
+          data={passengers}
+          keyExtractor={(u) => u.id}
+          contentContainerStyle={{ paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 24 }}
+          ListHeaderComponent={
+            passengers.length > 0 ? (
+              <Text style={s.sectionHeader}>{passengers.length} passageiro{passengers.length !== 1 ? "s" : ""} cadastrado{passengers.length !== 1 ? "s" : ""}</Text>
+            ) : null
+          }
+          renderItem={({ item }) => renderUserCard(item)}
+          ListEmptyComponent={
+            <View style={s.empty}>
+              <Feather name="user" size={48} color={colors.mutedForeground} />
+              <Text style={s.emptyText}>Nenhum passageiro ainda</Text>
+            </View>
+          }
+        />
       ) : (
         <FlatList
           style={s.list}
-          data={allUsers}
+          data={drivers}
           keyExtractor={(u) => u.id}
           contentContainerStyle={{ paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 24 }}
-          renderItem={({ item }) => (
-            <View style={s.userCard}>
-              <View style={s.avatar}>
-                <MaterialCommunityIcons
-                  name={item.mode === "driver" ? "car" : item.mode === "admin" ? "shield-check" : "account"}
-                  size={22} color="#000"
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={s.userName}>{item.name}</Text>
-                <Text style={s.userPhone}>{item.phone}</Text>
-                <View style={s.userModeRating}>
-                  <Text style={s.userMode}>
-                    {item.mode === "driver" ? "Motorista" : item.mode === "admin" ? "Admin" : "Cliente"}
-                  </Text>
-                  {(item as any).rating > 0 && (
-                    <Text style={s.userRating}>{(item as any).rating}★ ({(item as any).rideCount} corridas)</Text>
-                  )}
-                </View>
-              </View>
-            </View>
-          )}
+          ListHeaderComponent={
+            drivers.length > 0 ? (
+              <Text style={s.sectionHeader}>{drivers.length} motorista{drivers.length !== 1 ? "s" : ""} cadastrado{drivers.length !== 1 ? "s" : ""}</Text>
+            ) : null
+          }
+          renderItem={({ item }) => renderUserCard(item)}
           ListEmptyComponent={
             <View style={s.empty}>
-              <Feather name="users" size={48} color={colors.mutedForeground} />
-              <Text style={s.emptyText}>Nenhum usuário ainda</Text>
+              <MaterialCommunityIcons name="car" size={48} color={colors.mutedForeground} />
+              <Text style={s.emptyText}>Nenhum motorista ainda</Text>
             </View>
           }
         />
