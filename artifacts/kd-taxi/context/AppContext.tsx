@@ -31,9 +31,13 @@ export interface Ride {
   clientName: string;
   clientPhone: string;
   clientPhoto?: string;
+  clientAvgRating?: number;
+  clientRideCount?: number;
   driverId?: string;
   driverName?: string;
   driverPhoto?: string;
+  driverAvgRating?: number;
+  driverRideCount?: number;
   origin: string;
   destination: string;
   price?: number;

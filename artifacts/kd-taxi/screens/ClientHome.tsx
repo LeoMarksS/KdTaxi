@@ -188,6 +188,14 @@ export default function ClientHome() {
         <View>
           <Text style={s.greeting}>Olá,</Text>
           <Text style={s.userName}>{user?.name}</Text>
+          {(user?.rating ?? 0) > 0 && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
+              <Feather name="star" size={11} color={colors.primary} />
+              <Text style={{ fontSize: 12, color: colors.primary, fontFamily: "Inter_600SemiBold" }}>
+                {user!.rating!.toFixed(1)} · {user!.rideCount} corridas
+              </Text>
+            </View>
+          )}
         </View>
         <View style={s.headerRight}>
           <TouchableOpacity onPress={() => router.push("/profile")}>
@@ -214,7 +222,7 @@ export default function ClientHome() {
                   style={s.bigBtn}
                 >
                   <MaterialCommunityIcons name="car-side" size={52} color="#000" style={s.bigBtnIcon} />
-                  <Text style={s.bigBtnText}>Chamar Táxi</Text>
+                  <Text style={s.bigBtnText}>KD TAXI</Text>
                   <Text style={s.bigBtnSub}>Preencha os campos abaixo</Text>
                 </LinearGradient>
               </Animated.View>
@@ -335,6 +343,14 @@ export default function ClientHome() {
                   <View style={{ flex: 1 }}>
                     <Text style={s.driverName}>{activeRide.driverName}</Text>
                     <Text style={s.driverSub}>Seu motorista</Text>
+                    {(activeRide.driverAvgRating ?? 0) > 0 ? (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 }}>
+                        <Feather name="star" size={12} color={colors.primary} />
+                        <Text style={s.driverRating}>{activeRide.driverAvgRating!.toFixed(1)} · {activeRide.driverRideCount} corridas</Text>
+                      </View>
+                    ) : (
+                      <Text style={[s.driverSub, { marginTop: 2 }]}>Novo motorista</Text>
+                    )}
                   </View>
                 </View>
               )}

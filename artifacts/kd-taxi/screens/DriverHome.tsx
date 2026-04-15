@@ -44,6 +44,9 @@ function RideCard({ ride, onAccept, onDecline }: { ride: Ride; onAccept: () => v
     clientRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 14 },
     clientName: { fontSize: 18, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold" },
     clientPhone: { fontSize: 13, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
+    clientRatingRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 },
+    clientRatingText: { fontSize: 13, color: colors.statusWaiting, fontFamily: "Inter_600SemiBold" },
+    clientRatingCount: { fontSize: 11, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
     row: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
     dot: { width: 8, height: 8, borderRadius: 4 },
     routeText: { fontSize: 14, color: colors.foreground, flex: 1, fontFamily: "Inter_400Regular" },
@@ -78,6 +81,18 @@ function RideCard({ ride, onAccept, onDecline }: { ride: Ride; onAccept: () => v
           <View>
             <Text style={s.clientName}>{ride.clientName}</Text>
             <Text style={s.clientPhone}>{ride.clientPhone}</Text>
+            {(ride.clientAvgRating ?? 0) > 0 ? (
+              <View style={s.clientRatingRow}>
+                <Feather name="star" size={12} color={colors.statusWaiting} />
+                <Text style={s.clientRatingText}>{ride.clientAvgRating!.toFixed(1)}</Text>
+                <Text style={s.clientRatingCount}>({ride.clientRideCount} corridas)</Text>
+              </View>
+            ) : (
+              <View style={s.clientRatingRow}>
+                <Feather name="star" size={12} color={colors.mutedForeground} />
+                <Text style={s.clientRatingCount}>Sem avaliações ainda</Text>
+              </View>
+            )}
           </View>
         </View>
         <View style={s.row}>
@@ -209,7 +224,16 @@ export default function DriverHome() {
             </TouchableOpacity>
             <View>
               <Text style={s.userName}>{user?.name}</Text>
-              <Text style={s.userSub}>Motorista{user?.rating ? ` · ${user.rating} ★` : ""}</Text>
+              {(user?.rating ?? 0) > 0 ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
+                  <Feather name="star" size={11} color={colors.primary} />
+                  <Text style={[s.userSub, { color: colors.primary }]}>
+                    {user!.rating!.toFixed(1)} · {user!.rideCount} corridas
+                  </Text>
+                </View>
+              ) : (
+                <Text style={s.userSub}>Motorista</Text>
+              )}
             </View>
           </View>
           <View style={s.headerActions}>
@@ -251,6 +275,18 @@ export default function DriverHome() {
                   <View>
                     <Text style={s.clientName}>{activeRide.clientName}</Text>
                     <Text style={s.clientPhone}>{activeRide.clientPhone}</Text>
+                    {(activeRide.clientAvgRating ?? 0) > 0 ? (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 }}>
+                        <Feather name="star" size={12} color={colors.statusWaiting} />
+                        <Text style={{ fontSize: 12, color: colors.statusWaiting, fontFamily: "Inter_600SemiBold" }}>
+                          {activeRide.clientAvgRating!.toFixed(1)} · {activeRide.clientRideCount} corridas
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text style={{ fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2 }}>
+                        Novo passageiro
+                      </Text>
+                    )}
                   </View>
                 </View>
                 <View style={s.row}>

@@ -22,9 +22,13 @@ interface Ride {
   clientName: string;
   clientPhone: string;
   clientPhoto?: string;
+  clientAvgRating?: number;
+  clientRideCount?: number;
   driverId?: string;
   driverName?: string;
   driverPhoto?: string;
+  driverAvgRating?: number;
+  driverRideCount?: number;
   origin: string;
   destination: string;
   price?: number;
@@ -132,8 +136,12 @@ router.post("/request-ride", async (req: Request, res: Response) => {
   if (!clientId || !origin || !destination) { res.status(400).json({ error: "Missing required fields" }); return; }
 
   const price = lookupPrice(destination);
+  const client = users.get(clientId);
   const ride: Ride = {
-    id: getId(), clientId, clientName, clientPhone, clientPhoto, origin, destination,
+    id: getId(), clientId, clientName, clientPhone, clientPhoto,
+    clientAvgRating: client?.rating ?? 0,
+    clientRideCount: client?.rideCount ?? 0,
+    origin, destination,
     price, payment: (payment as Ride["payment"]) ?? "dinheiro",
     status: "waiting", createdAt: new Date().toISOString(),
   };
@@ -161,9 +169,12 @@ router.post("/accept-ride", async (req: Request, res: Response) => {
   if (!ride) { res.status(404).json({ error: "Ride not found" }); return; }
   if (ride.status !== "waiting") { res.status(409).json({ error: "Ride already taken" }); return; }
 
+  const driver = users.get(driverId);
   ride.driverId = driverId;
   ride.driverName = driverName;
   ride.driverPhoto = driverPhoto;
+  ride.driverAvgRating = driver?.rating ?? 0;
+  ride.driverRideCount = driver?.rideCount ?? 0;
   ride.status = "accepted";
   ride.acceptedAt = new Date().toISOString();
 
