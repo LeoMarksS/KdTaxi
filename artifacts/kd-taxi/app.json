@@ -15,10 +15,16 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.kdtaxi.app"
+      "bundleIdentifier": "com.kdtaxi.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Usado para foto do perfil.",
+        "NSPhotoLibraryUsageDescription": "Usado para selecionar foto do perfil.",
+        "NSMicrophoneUsageDescription": "Não utilizado."
+      }
     },
     "android": {
-      "package": "com.kdtaxi.app"
+      "package": "com.kdtaxi.app",
+      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "RECEIVE_BOOT_COMPLETED", "VIBRATE"]
     },
     "web": {
       "favicon": "./assets/images/icon.png"
@@ -31,7 +37,22 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#F5C518",
+          "sounds": []
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Permitir acesso às fotos para foto do perfil.",
+          "cameraPermission": "Permitir acesso à câmera para foto do perfil."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
