@@ -117,8 +117,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!user) return;
 
-    const socket = io(API_BASE.replace("/api", ""), {
-      transports: ["websocket", "polling"],
+    const socket = io(`https://${process.env.EXPO_PUBLIC_DOMAIN}`, {
+      path: "/api/socket.io",
+      transports: ["polling", "websocket"],
       query: { userId: user.id, mode: user.mode },
     });
     socketRef.current = socket;

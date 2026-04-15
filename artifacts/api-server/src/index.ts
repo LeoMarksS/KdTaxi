@@ -20,6 +20,7 @@ if (Number.isNaN(port) || port <= 0) {
 const httpServer = createServer(app);
 
 const io = new SocketIOServer(httpServer, {
+  path: "/api/socket.io",
   cors: {
     origin: "*",
     methods: ["GET", "POST"],
