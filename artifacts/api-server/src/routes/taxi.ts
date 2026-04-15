@@ -7,6 +7,7 @@ interface User {
   id: string;
   name: string;
   phone: string;
+  password?: string;
   mode: "client" | "driver" | "admin";
   active: boolean;
   photo?: string;
@@ -56,6 +57,20 @@ function getId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
 }
 
+// Create default admin account on startup
+const defaultAdmin: User = {
+  id: "admin-default",
+  name: "Administrador",
+  phone: "admin",
+  password: "admin123",
+  mode: "admin",
+  active: true,
+  rating: 0,
+  rideCount: 0,
+  createdAt: new Date().toISOString(),
+};
+users.set(defaultAdmin.id, defaultAdmin);
+
 async function sendPushNotification(token: string, title: string, body: string, data?: object) {
   try {
     await fetch("https://exp.host/--/api/v2/push/send", {
@@ -77,23 +92,47 @@ function lookupPrice(destination: string): number | undefined {
   return undefined;
 }
 
+function safeUser(u: User) {
+  return { ...u, photo: u.photo ? "[photo]" : undefined, password: undefined };
+}
+
 // POST /login
 router.post("/login", (req: Request, res: Response) => {
-  const { name, phone, mode, photo, pushToken } = req.body as {
-    name: string; phone: string; mode: string; photo?: string; pushToken?: string;
+  const { name, phone, mode, photo, password, pushToken } = req.body as {
+    name?: string; phone: string; mode: string; photo?: string; password?: string; pushToken?: string;
   };
-  if (!name || !phone || !mode) { res.status(400).json({ error: "Missing required fields" }); return; }
 
+  if (!phone || !mode) { res.status(400).json({ error: "Missing required fields" }); return; }
+
+  if (mode === "admin") {
+    // Admin login requires password
+    const admin = Array.from(users.values()).find((u) => u.mode === "admin" && u.phone === phone);
+    if (!admin || admin.password !== password) {
+      res.status(401).json({ error: "Credenciais inválidas" });
+      return;
+    }
+    if (photo) admin.photo = photo;
+    if (pushToken) admin.pushToken = pushToken;
+    res.json(safeUser(admin));
+    return;
+  }
+
+  if (!name) { res.status(400).json({ error: "Nome obrigatório" }); return; }
+
+  // Client/driver: register or return existing by phone+mode
   let user = Array.from(users.values()).find((u) => u.phone === phone && u.mode === mode);
   if (!user) {
-    user = { id: getId(), name, phone, mode: mode as User["mode"], active: true, rating: 0, rideCount: 0, createdAt: new Date().toISOString() };
+    user = {
+      id: getId(), name: name.trim(), phone, mode: mode as User["mode"],
+      active: true, rating: 0, rideCount: 0, createdAt: new Date().toISOString(),
+    };
     users.set(user.id, user);
   } else {
-    user.name = name;
+    user.name = name.trim();
   }
   if (photo) user.photo = photo;
   if (pushToken) user.pushToken = pushToken;
-  res.json(user);
+  res.json(safeUser(user));
 });
 
 // PUT /users/:id
@@ -104,19 +143,21 @@ router.put("/users/:id", (req: Request, res: Response) => {
   if (name) user.name = name;
   if (photo !== undefined) user.photo = photo;
   if (pushToken !== undefined) user.pushToken = pushToken;
-  res.json(user);
+  res.json(safeUser(user));
 });
 
 // GET /users
 router.get("/users", (_req: Request, res: Response) => {
-  res.json(Array.from(users.values()).map((u) => ({ ...u, photo: u.photo ? "[photo]" : undefined })));
+  res.json(Array.from(users.values())
+    .filter((u) => u.mode !== "admin")
+    .map(safeUser));
 });
 
 // GET /users/:id
 router.get("/users/:id", (req: Request, res: Response) => {
   const user = users.get(req.params.id!);
   if (!user) { res.status(404).json({ error: "Not found" }); return; }
-  res.json(user);
+  res.json(safeUser(user));
 });
 
 // POST /users/:id/active
@@ -124,8 +165,88 @@ router.post("/users/:id/active", (req: Request, res: Response) => {
   const user = users.get(req.params.id!);
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
   user.active = req.body.active;
-  res.json(user);
+  res.json(safeUser(user));
 });
+
+// ─── ADMIN ENDPOINTS ───────────────────────────────────────────────────────
+
+// PUT /admin/users/:id – admin can edit any user fully
+router.put("/admin/users/:id", (req: Request, res: Response) => {
+  const user = users.get(req.params.id!);
+  if (!user) { res.status(404).json({ error: "Not found" }); return; }
+  const { name, phone, mode, active, password } = req.body as {
+    name?: string; phone?: string; mode?: string; active?: boolean; password?: string;
+  };
+  if (name !== undefined) user.name = name.trim();
+  if (phone !== undefined) user.phone = phone.trim();
+  if (mode !== undefined) user.mode = mode as User["mode"];
+  if (active !== undefined) user.active = active;
+  if (password !== undefined && password.length >= 4) user.password = password;
+  res.json(safeUser(user));
+});
+
+// DELETE /admin/users/:id – admin deletes a user
+router.delete("/admin/users/:id", (req: Request, res: Response) => {
+  const user = users.get(req.params.id!);
+  if (!user) { res.status(404).json({ error: "Not found" }); return; }
+  if (user.mode === "admin") { res.status(403).json({ error: "Cannot delete admin account" }); return; }
+  users.delete(req.params.id!);
+  res.json({ ok: true });
+});
+
+// DELETE /admin/rides – clear all rides
+router.delete("/admin/rides", (_req: Request, res: Response) => {
+  rides.clear();
+  res.json({ ok: true });
+});
+
+// GET /admin/stats – system statistics
+router.get("/admin/stats", (_req: Request, res: Response) => {
+  const allRideList = Array.from(rides.values());
+  const allUserList = Array.from(users.values());
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const finishedRides = allRideList.filter((r) => r.status === "finished");
+  const todayRides = allRideList.filter((r) => new Date(r.createdAt) >= todayStart);
+  const todayFinished = todayRides.filter((r) => r.status === "finished");
+  const totalRevenue = finishedRides.reduce((s, r) => s + (r.price ?? 0), 0);
+  const todayRevenue = todayFinished.reduce((s, r) => s + (r.price ?? 0), 0);
+
+  res.json({
+    totalUsers: allUserList.filter((u) => u.mode !== "admin").length,
+    totalClients: allUserList.filter((u) => u.mode === "client").length,
+    totalDrivers: allUserList.filter((u) => u.mode === "driver").length,
+    totalRides: allRideList.length,
+    finishedRides: finishedRides.length,
+    cancelledRides: allRideList.filter((r) => r.status === "cancelled").length,
+    activeRides: allRideList.filter((r) => ["waiting", "accepted", "in_progress"].includes(r.status)).length,
+    totalRevenue,
+    todayRides: todayRides.length,
+    todayRevenue,
+    avgRating: allUserList.filter((u) => u.rideCount > 0).reduce((s, u) => s + u.rating, 0) /
+      Math.max(1, allUserList.filter((u) => u.rideCount > 0).length),
+  });
+});
+
+// POST /admin/users – create a new admin account
+router.post("/admin/users", (req: Request, res: Response) => {
+  const { name, phone, password, mode } = req.body as {
+    name: string; phone: string; password: string; mode?: string;
+  };
+  if (!name || !phone || !password) { res.status(400).json({ error: "Missing fields" }); return; }
+  const existing = Array.from(users.values()).find((u) => u.phone === phone);
+  if (existing) { res.status(409).json({ error: "Telefone já cadastrado" }); return; }
+  const user: User = {
+    id: getId(), name: name.trim(), phone: phone.trim(), password,
+    mode: (mode as User["mode"]) ?? "admin", active: true, rating: 0, rideCount: 0,
+    createdAt: new Date().toISOString(),
+  };
+  users.set(user.id, user);
+  res.json(safeUser(user));
+});
+
+// ─── RIDE ENDPOINTS ────────────────────────────────────────────────────────
 
 // POST /request-ride
 router.post("/request-ride", async (req: Request, res: Response) => {
@@ -150,7 +271,6 @@ router.post("/request-ride", async (req: Request, res: Response) => {
   const io = req.app.get("io");
   if (io) io.emit("nova_corrida", ride);
 
-  // Push notification to all online drivers
   for (const u of users.values()) {
     if (u.mode === "driver" && u.active && u.pushToken) {
       sendPushNotification(u.pushToken, "Nova corrida!", `${clientName}: ${origin} → ${destination}`, { rideId: ride.id });
@@ -181,7 +301,6 @@ router.post("/accept-ride", async (req: Request, res: Response) => {
   const io = req.app.get("io");
   if (io) io.emit("corrida_aceita", ride);
 
-  // Push notification to client
   const client = users.get(ride.clientId);
   if (client?.pushToken) {
     sendPushNotification(client.pushToken, "Motorista encontrado!", `${driverName} está a caminho`, { rideId });
@@ -202,7 +321,6 @@ router.post("/finish-ride", async (req: Request, res: Response) => {
   const io = req.app.get("io");
   if (io) io.emit("corrida_finalizada", ride);
 
-  // Push to client
   const client = users.get(ride.clientId);
   if (client?.pushToken) {
     sendPushNotification(client.pushToken, "Corrida finalizada!", "Avalie sua experiência", { rideId });
@@ -229,7 +347,6 @@ router.post("/rides/:id/rate", (req: Request, res: Response) => {
   if (raterMode === "client") ride.clientRating = rating;
   if (raterMode === "driver") ride.driverRating = rating;
 
-  // Update user average rating
   const targetId = raterMode === "client" ? ride.driverId : ride.clientId;
   if (targetId) {
     const u = users.get(targetId);
@@ -268,7 +385,6 @@ router.post("/pricing", (req: Request, res: Response) => {
   const { destination, price } = req.body as { destination: string; price: number };
   if (!destination || price === undefined) { res.status(400).json({ error: "Missing fields" }); return; }
 
-  // Check if already exists
   const existing = Array.from(pricing.values()).find(
     (p) => p.destination.toLowerCase() === destination.toLowerCase()
   );

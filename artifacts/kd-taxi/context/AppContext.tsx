@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
+import { Audio } from "expo-av";
 import { Platform } from "react-native";
 import React, {
   createContext,
@@ -66,6 +67,20 @@ export interface PriceRule {
   price: number;
 }
 
+export interface AdminStats {
+  totalUsers: number;
+  totalClients: number;
+  totalDrivers: number;
+  totalRides: number;
+  finishedRides: number;
+  cancelledRides: number;
+  activeRides: number;
+  totalRevenue: number;
+  todayRides: number;
+  todayRevenue: number;
+  avgRating: number;
+}
+
 interface AppContextValue {
   user: User | null;
   setUser: (user: User | null) => void;
@@ -92,13 +107,19 @@ interface AppContextValue {
   pricing: PriceRule[];
   myRides: Ride[];
   fetchMyRides: () => Promise<void>;
+  adminStats: AdminStats | null;
   refreshAdminData: () => Promise<void>;
+  refreshAdminStats: () => Promise<void>;
   refreshPricing: () => Promise<void>;
   setPricingRule: (destination: string, price: number) => Promise<void>;
   deletePricingRule: (id: string) => Promise<void>;
   lookupPrice: (destination: string) => Promise<number | null>;
   finishedRideToRate: Ride | null;
   clearFinishedRideToRate: () => void;
+  // Admin operations
+  adminUpdateUser: (id: string, data: { name?: string; phone?: string; mode?: string; active?: boolean; password?: string }) => Promise<boolean>;
+  adminDeleteUser: (id: string) => Promise<boolean>;
+  adminClearRides: () => Promise<boolean>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -130,6 +151,39 @@ async function registerForPushNotifications(): Promise<string | null> {
   }
 }
 
+// Play a beep sound to alert driver of incoming ride
+async function playRideRequestSound() {
+  if (Platform.OS === "web") {
+    try {
+      const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const freqs = [880, 1100, 880, 1100];
+      freqs.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.3, ctx.currentTime + i * 0.2);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.2 + 0.18);
+        osc.start(ctx.currentTime + i * 0.2);
+        osc.stop(ctx.currentTime + i * 0.2 + 0.2);
+      });
+    } catch {}
+    return;
+  }
+  try {
+    await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+    const { sound } = await Audio.Sound.createAsync(
+      { uri: "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" },
+      { shouldPlay: true, volume: 1.0 }
+    );
+    setTimeout(() => sound.unloadAsync().catch(() => {}), 5000);
+  } catch {}
+}
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [user, setUserState] = useState<User | null>(null);
   const [isDriverOnline, setDriverOnlineState] = useState(false);
@@ -141,11 +195,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [pricing, setPricing] = useState<PriceRule[]>([]);
   const [myRides, setMyRides] = useState<Ride[]>([]);
+  const [adminStats, setAdminStats] = useState<AdminStats | null>(null);
   const [finishedRideToRate, setFinishedRideToRate] = useState<Ride | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const userRef = useRef<User | null>(null);
 
-  // Keep userRef in sync so socket handlers can access latest user
   useEffect(() => { userRef.current = user; }, [user]);
 
   // Load persisted state
@@ -228,6 +282,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (exists) return prev;
           return [ride, ...prev];
         });
+        // Play custom alert sound
+        playRideRequestSound();
         Notifications.scheduleNotificationAsync({
           content: {
             title: "Nova corrida!",
@@ -267,7 +323,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     socket.on("mensagem_chat", (msg: ChatMessage) => {
       setChatMessages((prev) => [...prev, msg]);
-      // Increment unread count only for messages from others
       if (msg.senderId !== userRef.current?.id) {
         setUnreadChatCount((c) => c + 1);
         Notifications.scheduleNotificationAsync({
@@ -380,6 +435,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setUnreadChatCount(0);
     setFinishedRideToRate(null);
     setDriverOnlineState(false);
+    setAdminStats(null);
     AsyncStorage.multiRemove(["kd_driver_online", "kd_active_ride"]);
   }, [setUser]);
 
@@ -390,6 +446,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ]);
     if (ridesRes.ok) setAllRides(await ridesRes.json());
     if (usersRes.ok) setAllUsers(await usersRes.json());
+  }, []);
+
+  const refreshAdminStats = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/stats`);
+      if (res.ok) setAdminStats(await res.json());
+    } catch {}
   }, []);
 
   const fetchMyRides = useCallback(async () => {
@@ -427,6 +490,46 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return null;
   }, []);
 
+  const adminUpdateUser = useCallback(async (id: string, data: {
+    name?: string; phone?: string; mode?: string; active?: boolean; password?: string;
+  }): Promise<boolean> => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/users/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setAllUsers((prev) => prev.map((u) => u.id === id ? { ...u, ...updated } : u));
+        return true;
+      }
+    } catch {}
+    return false;
+  }, []);
+
+  const adminDeleteUser = useCallback(async (id: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/users/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setAllUsers((prev) => prev.filter((u) => u.id !== id));
+        return true;
+      }
+    } catch {}
+    return false;
+  }, []);
+
+  const adminClearRides = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/rides`, { method: "DELETE" });
+      if (res.ok) {
+        setAllRides([]);
+        return true;
+      }
+    } catch {}
+    return false;
+  }, []);
+
   return (
     <AppContext.Provider value={{
       user, setUser, updateProfile,
@@ -438,8 +541,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       requestRide, acceptRide, declineRide, finishRide, cancelRide, rateRide,
       logout, allRides, allUsers, pricing,
       myRides, fetchMyRides,
-      refreshAdminData, refreshPricing, setPricingRule, deletePricingRule, lookupPrice,
+      adminStats, refreshAdminData, refreshAdminStats, refreshPricing,
+      setPricingRule, deletePricingRule, lookupPrice,
       finishedRideToRate, clearFinishedRideToRate: () => setFinishedRideToRate(null),
+      adminUpdateUser, adminDeleteUser, adminClearRides,
     }}>
       {children}
     </AppContext.Provider>

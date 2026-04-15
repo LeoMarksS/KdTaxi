@@ -29,6 +29,22 @@ import { useColors } from "@/hooks/useColors";
 import { UserAvatar } from "@/components/UserAvatar";
 import { RatingModal } from "@/components/RatingModal";
 
+function StarRating({ rating, size = 14 }: { rating: number; size?: number }) {
+  const colors = useColors();
+  return (
+    <View style={{ flexDirection: "row", gap: 2 }}>
+      {[1, 2, 3, 4, 5].map((s) => (
+        <Feather
+          key={s}
+          name="star"
+          size={size}
+          color={s <= Math.round(rating) ? colors.primary : colors.border}
+        />
+      ))}
+    </View>
+  );
+}
+
 export default function ClientHome() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -63,7 +79,6 @@ export default function ClientHome() {
     }
   }, [activeRide?.status]);
 
-  // Reset cancel confirmation when ride changes
   useEffect(() => {
     setConfirmingCancel(false);
   }, [activeRide?.id]);
@@ -98,6 +113,8 @@ export default function ClientHome() {
   };
 
   const totalSpent = myRides.reduce((sum, r) => sum + (r.price ?? 0), 0);
+  const rating = user?.rating ?? 0;
+  const rideCount = user?.rideCount ?? 0;
 
   const statusConfig = {
     waiting: { label: "Procurando motorista...", color: colors.statusWaiting, icon: "clock" as const },
@@ -111,16 +128,24 @@ export default function ClientHome() {
     container: { flex: 1, backgroundColor: colors.background },
     header: {
       paddingTop: Platform.OS === "web" ? 67 : insets.top + 8,
-      paddingHorizontal: 24, paddingBottom: 16,
-      flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+      paddingHorizontal: 24, paddingBottom: 14,
     },
+    headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
     greeting: { fontSize: 13, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
     userName: { fontSize: 20, color: colors.foreground, fontWeight: "700", fontFamily: "Inter_700Bold" },
     headerRight: { flexDirection: "row", alignItems: "center", gap: 12 },
+    // Stats row
+    statsRow: { flexDirection: "row", gap: 10 },
+    statCard: {
+      flex: 1, backgroundColor: colors.card, borderRadius: 12, padding: 12,
+      alignItems: "center", borderWidth: 1, borderColor: colors.border,
+    },
+    statValue: { fontSize: 18, fontWeight: "900", fontFamily: "Inter_700Bold" },
+    statLabel: { fontSize: 10, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2, textAlign: "center" },
     scroll: { flex: 1, paddingHorizontal: 24 },
     bigBtn: {
-      borderRadius: 24, paddingVertical: 28, alignItems: "center", justifyContent: "center",
-      marginBottom: 24, shadowColor: colors.primary,
+      borderRadius: 24, paddingVertical: 24, alignItems: "center", justifyContent: "center",
+      marginBottom: 20, shadowColor: colors.primary,
       shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.4, shadowRadius: 20, elevation: 12,
     },
     bigBtnIcon: { marginBottom: 8 },
@@ -128,7 +153,7 @@ export default function ClientHome() {
     bigBtnSub: { fontSize: 14, color: "#00000088", marginTop: 4, fontFamily: "Inter_400Regular" },
     formCard: {
       backgroundColor: colors.card, borderRadius: colors.radius,
-      padding: 20, marginBottom: 20, borderWidth: 1, borderColor: colors.border,
+      padding: 20, marginBottom: 18, borderWidth: 1, borderColor: colors.border,
     },
     formTitle: { fontSize: 16, fontWeight: "700", color: colors.foreground, marginBottom: 16, fontFamily: "Inter_700Bold" },
     inputRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 },
@@ -161,7 +186,7 @@ export default function ClientHome() {
     confirmBtnText: { fontSize: 16, fontWeight: "700", color: "#000", fontFamily: "Inter_700Bold" },
     statusCard: {
       backgroundColor: colors.card, borderRadius: colors.radius,
-      padding: 24, marginBottom: 20, borderWidth: 1, borderColor: colors.border,
+      padding: 22, marginBottom: 18, borderWidth: 1, borderColor: colors.border,
     },
     statusBadge: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 },
     statusText: { fontSize: 18, fontWeight: "700", fontFamily: "Inter_700Bold" },
@@ -179,7 +204,6 @@ export default function ClientHome() {
     },
     driverName: { fontSize: 16, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold" },
     driverSub: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
-    driverRating: { fontSize: 12, color: colors.primary, fontFamily: "Inter_600SemiBold", marginTop: 2 },
     actionRow: { flexDirection: "row", gap: 12, marginTop: 16 },
     chatBtnWrap: { flex: 1, position: "relative" },
     chatBtn: {
@@ -209,16 +233,10 @@ export default function ClientHome() {
       alignItems: "center", borderWidth: 1, borderColor: colors.border,
     },
     cancelBackText: { fontSize: 14, fontWeight: "500", color: colors.mutedForeground, fontFamily: "Inter_500Medium" },
-    paymentInfoBadge: {
-      flexDirection: "row", alignItems: "center", gap: 6,
-      backgroundColor: colors.muted, borderRadius: 8,
-      paddingHorizontal: 10, paddingVertical: 6, marginTop: 4, alignSelf: "flex-start",
-    },
-    paymentInfoText: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_500Medium" },
     historyToggle: {
       flexDirection: "row", alignItems: "center", justifyContent: "space-between",
       backgroundColor: colors.card, borderRadius: colors.radius,
-      padding: 16, marginBottom: 12, borderWidth: 1, borderColor: colors.border,
+      padding: 16, marginBottom: 10, borderWidth: 1, borderColor: colors.border,
     },
     historyTitle: { fontSize: 15, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold" },
     historySubtitle: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
@@ -239,38 +257,63 @@ export default function ClientHome() {
     },
     totalLabel: { fontSize: 13, color: colors.destructive, fontFamily: "Inter_600SemiBold" },
     totalValue: { fontSize: 20, fontWeight: "900", color: colors.destructive, fontFamily: "Inter_700Bold" },
+    inputDotEmpty: { width: 10 },
   });
 
   return (
     <View style={s.container}>
       <RatingModal />
       <View style={s.header}>
-        <View>
-          <Text style={s.greeting}>Olá,</Text>
-          <Text style={s.userName}>{user?.name}</Text>
-          {(user?.rating ?? 0) > 0 && (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
-              <Feather name="star" size={11} color={colors.primary} />
-              <Text style={{ fontSize: 12, color: colors.primary, fontFamily: "Inter_600SemiBold" }}>
-                {user!.rating!.toFixed(1)} · {user!.rideCount} corridas
-              </Text>
-            </View>
-          )}
+        <View style={s.headerRow}>
+          <View>
+            <Text style={s.greeting}>Olá,</Text>
+            <Text style={s.userName}>{user?.name}</Text>
+          </View>
+          <View style={s.headerRight}>
+            <TouchableOpacity onPress={() => router.push("/profile")}>
+              <UserAvatar name={user?.name ?? "?"} photo={user?.photo} size={40} mode="client" />
+            </TouchableOpacity>
+            <TouchableOpacity style={{ padding: 4 }} onPress={logout}>
+              <Feather name="log-out" size={20} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </View>
         </View>
-        <View style={s.headerRight}>
-          <TouchableOpacity onPress={() => router.push("/profile")}>
-            <UserAvatar name={user?.name ?? "?"} photo={user?.photo} size={38} mode="client" />
-          </TouchableOpacity>
-          <TouchableOpacity style={{ padding: 4 }} onPress={logout}>
-            <Feather name="log-out" size={20} color={colors.mutedForeground} />
-          </TouchableOpacity>
+
+        {/* Stats row */}
+        <View style={s.statsRow}>
+          <View style={s.statCard}>
+            <Text style={[s.statValue, { color: colors.destructive }]}>
+              R$ {totalSpent.toFixed(0)}
+            </Text>
+            <Text style={s.statLabel}>Total gasto</Text>
+          </View>
+          <View style={s.statCard}>
+            <Text style={[s.statValue, { color: colors.primary }]}>{myRides.length}</Text>
+            <Text style={s.statLabel}>Corridas</Text>
+          </View>
+          <View style={[s.statCard, { backgroundColor: colors.primary + "18", borderColor: colors.primary + "44" }]}>
+            {rating > 0 ? (
+              <>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <Feather name="star" size={14} color={colors.primary} />
+                  <Text style={[s.statValue, { color: colors.primary, fontSize: 20 }]}>{rating.toFixed(1)}</Text>
+                </View>
+                <Text style={[s.statLabel, { color: colors.primary }]}>{rideCount} avaliações</Text>
+              </>
+            ) : (
+              <>
+                <Feather name="star" size={18} color={colors.mutedForeground} />
+                <Text style={s.statLabel}>Sem avaliações</Text>
+              </>
+            )}
+          </View>
         </View>
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView
           style={s.scroll}
-          contentContainerStyle={{ paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 24 }}
+          contentContainerStyle={{ paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 24, paddingTop: 14 }}
           keyboardShouldPersistTaps="handled"
         >
           {!activeRide ? (
@@ -281,7 +324,7 @@ export default function ClientHome() {
                   start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
                   style={s.bigBtn}
                 >
-                  <MaterialCommunityIcons name="car-side" size={52} color="#000" style={s.bigBtnIcon} />
+                  <MaterialCommunityIcons name="car-side" size={48} color="#000" style={s.bigBtnIcon} />
                   <Text style={s.bigBtnText}>KD TAXI</Text>
                   <Text style={s.bigBtnSub}>Preencha os campos abaixo</Text>
                 </LinearGradient>
@@ -440,9 +483,11 @@ export default function ClientHome() {
                     <Text style={s.driverName}>{activeRide.driverName}</Text>
                     <Text style={s.driverSub}>Seu motorista</Text>
                     {(activeRide.driverAvgRating ?? 0) > 0 ? (
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 }}>
-                        <Feather name="star" size={12} color={colors.primary} />
-                        <Text style={s.driverRating}>{activeRide.driverAvgRating!.toFixed(1)} · {activeRide.driverRideCount} corridas</Text>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 }}>
+                        <StarRating rating={activeRide.driverAvgRating!} size={13} />
+                        <Text style={{ fontSize: 12, color: colors.primary, fontFamily: "Inter_600SemiBold" }}>
+                          {activeRide.driverAvgRating!.toFixed(1)} ({activeRide.driverRideCount} corridas)
+                        </Text>
                       </View>
                     ) : (
                       <Text style={[s.driverSub, { marginTop: 2 }]}>Novo motorista</Text>

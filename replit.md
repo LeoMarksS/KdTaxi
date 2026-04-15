@@ -29,7 +29,10 @@ pnpm workspace monorepo using TypeScript. Contains KD TAXI — a simplified Uber
 ### API Server (`artifacts/api-server`)
 - Express 5 with Socket.io
 - Routes: /login, /request-ride, /accept-ride, /finish-ride, /cancel-ride, /rides, /users
+- Admin routes: PUT/DELETE /admin/users/:id, DELETE /admin/rides, GET /admin/stats, POST /admin/users
+- Admin auth: password-protected, default admin phone="admin" password="admin123"
 - Socket events: nova_corrida, corrida_aceita, corrida_finalizada, corrida_cancelada, mensagem_chat
+- safeUser() strips passwords from all responses
 
 ## Key Commands
 

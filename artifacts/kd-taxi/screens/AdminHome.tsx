@@ -1,7 +1,7 @@
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator, FlatList, Platform, StyleSheet,
+  ActivityIndicator, FlatList, Platform, ScrollView, StyleSheet,
   Text, TextInput, TouchableOpacity, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,24 +9,167 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { UserAvatar } from "@/components/UserAvatar";
-import type { PriceRule, Ride } from "@/context/AppContext";
+import type { User } from "@/context/AppContext";
 
-type Tab = "rides" | "passengers" | "drivers" | "pricing";
+type Tab = "dashboard" | "rides" | "passengers" | "drivers" | "pricing";
+
+function StatCard({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color: string }) {
+  const colors = useColors();
+  const s = StyleSheet.create({
+    card: {
+      flex: 1, backgroundColor: colors.card, borderRadius: 14, padding: 14,
+      borderWidth: 1, borderColor: colors.border, alignItems: "center", minWidth: 80,
+    },
+    num: { fontSize: 26, fontWeight: "900", fontFamily: "Inter_700Bold" },
+    label: { fontSize: 11, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2, textAlign: "center" },
+    sub: { fontSize: 11, fontFamily: "Inter_600SemiBold", marginTop: 2 },
+  });
+  return (
+    <View style={s.card}>
+      <Text style={[s.num, { color }]}>{value}</Text>
+      <Text style={s.label}>{label}</Text>
+      {sub && <Text style={[s.sub, { color }]}>{sub}</Text>}
+    </View>
+  );
+}
+
+function EditUserModal({ user, onSave, onDelete, onClose }: {
+  user: User;
+  onSave: (id: string, data: { name: string; phone: string }) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const colors = useColors();
+  const [name, setName] = useState(user.name);
+  const [phone, setPhone] = useState(user.phone);
+  const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const s = StyleSheet.create({
+    overlay: {
+      position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+      backgroundColor: "rgba(0,0,0,0.6)", zIndex: 100,
+      alignItems: "center", justifyContent: "center", padding: 24,
+    },
+    card: {
+      backgroundColor: colors.background, borderRadius: 20, padding: 24,
+      width: "100%", maxWidth: 400, borderWidth: 1, borderColor: colors.border,
+    },
+    title: { fontSize: 18, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold", marginBottom: 18 },
+    label: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_500Medium", marginBottom: 6, textTransform: "uppercase" },
+    input: {
+      backgroundColor: colors.card, borderRadius: 12,
+      paddingHorizontal: 14, paddingVertical: 14, fontSize: 15,
+      color: colors.foreground, fontFamily: "Inter_400Regular",
+      borderWidth: 1, borderColor: colors.border, marginBottom: 14,
+    },
+    row: { flexDirection: "row", gap: 10, marginTop: 8 },
+    saveBtn: {
+      flex: 2, backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 14,
+      alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8,
+    },
+    saveBtnText: { fontSize: 15, fontWeight: "700", color: "#000", fontFamily: "Inter_700Bold" },
+    cancelBtn: {
+      flex: 1, backgroundColor: colors.muted, borderRadius: 12, paddingVertical: 14, alignItems: "center",
+      borderWidth: 1, borderColor: colors.border,
+    },
+    cancelBtnText: { fontSize: 14, color: colors.mutedForeground, fontFamily: "Inter_500Medium" },
+    deleteBtn: {
+      backgroundColor: colors.destructive + "22", borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14,
+      alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 6,
+      borderWidth: 1, borderColor: colors.destructive,
+      marginTop: 16,
+    },
+    deleteBtnText: { fontSize: 14, fontWeight: "700", color: colors.destructive, fontFamily: "Inter_700Bold" },
+  });
+
+  return (
+    <View style={s.overlay}>
+      <View style={s.card}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 20 }}>
+          <UserAvatar name={user.name} size={44} mode={user.mode as any} />
+          <View style={{ flex: 1 }}>
+            <Text style={s.title}>{user.mode === "driver" ? "Editar Motorista" : "Editar Passageiro"}</Text>
+          </View>
+        </View>
+
+        <Text style={s.label}>Nome</Text>
+        <TextInput style={s.input} value={name} onChangeText={setName} placeholderTextColor={colors.mutedForeground} />
+
+        <Text style={s.label}>Telefone</Text>
+        <TextInput style={s.input} value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholderTextColor={colors.mutedForeground} />
+
+        <View style={s.row}>
+          <TouchableOpacity style={s.cancelBtn} onPress={onClose}>
+            <Text style={s.cancelBtnText}>Cancelar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.saveBtn} disabled={saving} onPress={async () => {
+            setSaving(true);
+            await onSave(user.id, { name: name.trim(), phone: phone.trim() });
+            setSaving(false);
+            onClose();
+          }}>
+            {saving ? <ActivityIndicator color="#000" size="small" /> : (
+              <>
+                <Feather name="check" size={16} color="#000" />
+                <Text style={s.saveBtnText}>Salvar</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {confirmDelete ? (
+          <View style={s.row}>
+            <TouchableOpacity style={[s.cancelBtn, { flex: 1 }]} onPress={() => setConfirmDelete(false)}>
+              <Text style={s.cancelBtnText}>Não</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[s.deleteBtn, { flex: 2, marginTop: 0 }]} onPress={async () => {
+              setSaving(true);
+              await onDelete(user.id);
+              onClose();
+            }}>
+              <Feather name="trash-2" size={16} color={colors.destructive} />
+              <Text style={s.deleteBtnText}>Sim, excluir</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity style={s.deleteBtn} onPress={() => setConfirmDelete(true)}>
+            <Feather name="trash-2" size={16} color={colors.destructive} />
+            <Text style={s.deleteBtnText}>Excluir usuário</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+}
 
 export default function AdminHome() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { allRides, allUsers, pricing, refreshAdminData, refreshPricing, setPricingRule, deletePricingRule, logout } = useApp();
-  const [tab, setTab] = useState<Tab>("rides");
+  const {
+    allRides, allUsers, pricing, adminStats,
+    refreshAdminData, refreshAdminStats, refreshPricing,
+    setPricingRule, deletePricingRule, logout,
+    adminUpdateUser, adminDeleteUser, adminClearRides,
+  } = useApp();
+
+  const [tab, setTab] = useState<Tab>("dashboard");
   const [loading, setLoading] = useState(true);
   const [newCity, setNewCity] = useState("");
   const [newPrice, setNewPrice] = useState("");
   const [savingPrice, setSavingPrice] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [confirmClearRides, setConfirmClearRides] = useState(false);
+  const [clearingRides, setClearingRides] = useState(false);
 
   useEffect(() => {
-    Promise.all([refreshAdminData(), refreshPricing()]).then(() => setLoading(false));
-    const interval = setInterval(() => refreshAdminData(), 5000);
+    Promise.all([refreshAdminData(), refreshPricing(), refreshAdminStats()])
+      .then(() => setLoading(false));
+    const interval = setInterval(() => {
+      refreshAdminData();
+      refreshAdminStats();
+    }, 6000);
     return () => clearInterval(interval);
   }, []);
 
@@ -49,13 +192,13 @@ export default function AdminHome() {
     setSavingPrice(false);
   };
 
-  const handleDeletePrice = (rule: PriceRule) => {
-    setPendingDeleteId(rule.id);
-  };
-
-  const confirmDeletePrice = async (id: string) => {
-    setPendingDeleteId(null);
-    await deletePricingRule(id);
+  const handleClearRides = async () => {
+    if (!confirmClearRides) { setConfirmClearRides(true); return; }
+    setClearingRides(true);
+    await adminClearRides();
+    await refreshAdminStats();
+    setConfirmClearRides(false);
+    setClearingRides(false);
   };
 
   const activeRides = allRides.filter((r) => ["waiting", "accepted", "in_progress"].includes(r.status));
@@ -66,24 +209,17 @@ export default function AdminHome() {
     container: { flex: 1, backgroundColor: colors.background },
     header: {
       paddingTop: Platform.OS === "web" ? 67 : insets.top + 8,
-      paddingHorizontal: 24, paddingBottom: 16,
+      paddingHorizontal: 24, paddingBottom: 12,
       flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     },
     title: { fontSize: 24, fontWeight: "900", color: colors.foreground, fontFamily: "Inter_700Bold" },
     sub: { fontSize: 13, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
-    stats: { flexDirection: "row", paddingHorizontal: 24, gap: 10, marginBottom: 16 },
-    statCard: {
-      flex: 1, backgroundColor: colors.card, borderRadius: 12, padding: 14,
-      alignItems: "center", borderWidth: 1, borderColor: colors.border,
-    },
-    statNum: { fontSize: 24, fontWeight: "900", color: colors.foreground, fontFamily: "Inter_700Bold" },
-    statLabel: { fontSize: 11, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2 },
-    tabs: { flexDirection: "row", paddingHorizontal: 24, gap: 6, marginBottom: 16 },
+    tabs: { flexDirection: "row", paddingHorizontal: 16, gap: 5, marginBottom: 14 },
     tabBtn: {
-      flex: 1, paddingVertical: 10, borderRadius: 12,
-      alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 5,
+      flex: 1, paddingVertical: 9, borderRadius: 10,
+      alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 4,
     },
-    tabText: { fontSize: 11, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
+    tabText: { fontSize: 10, fontWeight: "700", fontFamily: "Inter_700Bold" },
     list: { flex: 1, paddingHorizontal: 24 },
     card: {
       backgroundColor: colors.card, borderRadius: colors.radius,
@@ -103,7 +239,7 @@ export default function AdminHome() {
     userCard: {
       backgroundColor: colors.card, borderRadius: colors.radius, padding: 16,
       marginBottom: 10, borderWidth: 1, borderColor: colors.border,
-      flexDirection: "row", alignItems: "center", gap: 14,
+      flexDirection: "row", alignItems: "center", gap: 12,
     },
     userInfo: { flex: 1 },
     userName: { fontSize: 16, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold" },
@@ -111,16 +247,17 @@ export default function AdminHome() {
     userRatingRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 },
     userRatingBadge: {
       flexDirection: "row", alignItems: "center", gap: 4,
-      backgroundColor: colors.primary + "22", borderRadius: 8,
-      paddingHorizontal: 8, paddingVertical: 3,
+      backgroundColor: colors.primary + "22", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3,
     },
     userRatingText: { fontSize: 13, fontWeight: "700", color: colors.primary, fontFamily: "Inter_700Bold" },
     userRideCount: { fontSize: 11, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
     noRating: { fontSize: 11, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 4 },
+    editBtn: {
+      width: 36, height: 36, borderRadius: 18, backgroundColor: colors.muted,
+      alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border,
+    },
     empty: { alignItems: "center", paddingVertical: 48, gap: 12 },
     emptyText: { fontSize: 15, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
-
-    // Pricing tab
     pricingContent: { flex: 1, paddingHorizontal: 24 },
     addCard: {
       backgroundColor: colors.card, borderRadius: colors.radius,
@@ -164,16 +301,50 @@ export default function AdminHome() {
       fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_500Medium",
       letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 10, marginTop: 4,
     },
+    dashScroll: { flex: 1, paddingHorizontal: 20 },
+    dashSection: { marginBottom: 20 },
+    dashSectionTitle: {
+      fontSize: 13, color: colors.mutedForeground, fontFamily: "Inter_600SemiBold",
+      letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 10,
+    },
+    statRow: { flexDirection: "row", gap: 10, marginBottom: 10 },
+    revenueCard: {
+      backgroundColor: colors.statusAccepted + "18", borderRadius: 16, padding: 18,
+      borderWidth: 1, borderColor: colors.statusAccepted + "44", marginBottom: 10,
+      flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    },
+    revenueLabel: { fontSize: 14, color: colors.statusAccepted, fontFamily: "Inter_600SemiBold" },
+    revenueValue: { fontSize: 28, fontWeight: "900", color: colors.statusAccepted, fontFamily: "Inter_700Bold" },
+    revenueToday: { fontSize: 12, color: colors.statusAccepted + "aa", fontFamily: "Inter_400Regular", marginTop: 4 },
+    dangerCard: {
+      backgroundColor: colors.destructive + "15", borderRadius: 14, padding: 16,
+      borderWidth: 1, borderColor: colors.destructive + "44",
+      flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    },
+    dangerCardTitle: { fontSize: 14, fontWeight: "700", color: colors.destructive, fontFamily: "Inter_700Bold" },
+    dangerCardSub: { fontSize: 12, color: colors.destructive + "aa", fontFamily: "Inter_400Regular", marginTop: 2 },
+    dangerBtn: {
+      backgroundColor: colors.destructive, borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14,
+      flexDirection: "row", alignItems: "center", gap: 6,
+    },
+    dangerBtnConfirm: {
+      backgroundColor: colors.destructive + "33", borderRadius: 10, paddingVertical: 10, paddingHorizontal: 14,
+      flexDirection: "row", alignItems: "center", gap: 6,
+      borderWidth: 1, borderColor: colors.destructive,
+    },
+    dangerBtnText: { fontSize: 13, fontWeight: "700", color: "#fff", fontFamily: "Inter_700Bold" },
+    dangerBtnTextAlt: { fontSize: 13, fontWeight: "700", color: colors.destructive, fontFamily: "Inter_700Bold" },
   });
 
   const tabs: { id: Tab; label: string; icon: string }[] = [
+    { id: "dashboard", label: "Dashboard", icon: "bar-chart-2" },
     { id: "rides", label: "Corridas", icon: "car" },
     { id: "passengers", label: "Passag.", icon: "user" },
     { id: "drivers", label: "Motoristas", icon: "truck" },
     { id: "pricing", label: "Preços", icon: "dollar-sign" },
   ];
 
-  const renderUserCard = (item: typeof allUsers[number]) => (
+  const renderUserCard = (item: User) => (
     <View style={s.userCard} key={item.id}>
       <UserAvatar name={item.name} size={46} mode={item.mode as any} />
       <View style={s.userInfo}>
@@ -191,11 +362,23 @@ export default function AdminHome() {
           <Text style={s.noRating}>Sem avaliações ainda</Text>
         )}
       </View>
+      <TouchableOpacity style={s.editBtn} onPress={() => setEditingUser(item)}>
+        <Feather name="edit-2" size={15} color={colors.mutedForeground} />
+      </TouchableOpacity>
     </View>
   );
 
   return (
     <View style={s.container}>
+      {editingUser && (
+        <EditUserModal
+          user={editingUser}
+          onSave={async (id, data) => { await adminUpdateUser(id, data); }}
+          onDelete={async (id) => { await adminDeleteUser(id); }}
+          onClose={() => setEditingUser(null)}
+        />
+      )}
+
       <View style={s.header}>
         <View>
           <Text style={s.title}>Admin</Text>
@@ -206,33 +389,14 @@ export default function AdminHome() {
         </TouchableOpacity>
       </View>
 
-      <View style={s.stats}>
-        <View style={s.statCard}>
-          <Text style={[s.statNum, { color: colors.statusWaiting }]}>{activeRides.length}</Text>
-          <Text style={s.statLabel}>Ativas</Text>
-        </View>
-        <View style={s.statCard}>
-          <Text style={[s.statNum, { color: colors.statusAccepted }]}>{drivers.length}</Text>
-          <Text style={s.statLabel}>Motoristas</Text>
-        </View>
-        <View style={s.statCard}>
-          <Text style={[s.statNum, { color: colors.primary }]}>{passengers.length}</Text>
-          <Text style={s.statLabel}>Passag.</Text>
-        </View>
-        <View style={s.statCard}>
-          <Text style={[s.statNum, { color: colors.statusInProgress }]}>{allRides.length}</Text>
-          <Text style={s.statLabel}>Total</Text>
-        </View>
-      </View>
-
       <View style={s.tabs}>
         {tabs.map((t) => (
           <TouchableOpacity
             key={t.id}
-            style={[s.tabBtn, { backgroundColor: tab === t.id ? colors.primary : colors.card }]}
+            style={[s.tabBtn, { backgroundColor: tab === t.id ? colors.primary : colors.card, borderWidth: 1, borderColor: tab === t.id ? colors.primary : colors.border }]}
             onPress={() => setTab(t.id)}
           >
-            <Feather name={t.icon as any} size={13} color={tab === t.id ? "#000" : colors.mutedForeground} />
+            <Feather name={t.icon as any} size={12} color={tab === t.id ? "#000" : colors.mutedForeground} />
             <Text style={[s.tabText, { color: tab === t.id ? "#000" : colors.mutedForeground }]}>{t.label}</Text>
           </TouchableOpacity>
         ))}
@@ -240,6 +404,75 @@ export default function AdminHome() {
 
       {loading ? (
         <View style={s.empty}><ActivityIndicator color={colors.primary} size="large" /></View>
+      ) : tab === "dashboard" ? (
+        <ScrollView style={s.dashScroll} contentContainerStyle={{ paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 24 }}>
+          <View style={s.dashSection}>
+            <Text style={s.dashSectionTitle}>Receita</Text>
+            <View style={s.revenueCard}>
+              <View>
+                <Text style={s.revenueLabel}>Total arrecadado</Text>
+                <Text style={s.revenueValue}>
+                  R$ {(adminStats?.totalRevenue ?? 0).toFixed(2).replace(".", ",")}
+                </Text>
+                <Text style={s.revenueToday}>
+                  Hoje: R$ {(adminStats?.todayRevenue ?? 0).toFixed(2).replace(".", ",")}
+                </Text>
+              </View>
+              <MaterialCommunityIcons name="cash-multiple" size={44} color={colors.statusAccepted + "66"} />
+            </View>
+          </View>
+
+          <View style={s.dashSection}>
+            <Text style={s.dashSectionTitle}>Corridas</Text>
+            <View style={s.statRow}>
+              <StatCard label="Hoje" value={adminStats?.todayRides ?? 0} color={colors.primary} />
+              <StatCard label="Ativas" value={adminStats?.activeRides ?? 0} color={colors.statusWaiting} />
+              <StatCard label="Finalizadas" value={adminStats?.finishedRides ?? 0} color={colors.statusAccepted} />
+              <StatCard label="Canceladas" value={adminStats?.cancelledRides ?? 0} color={colors.mutedForeground} />
+            </View>
+          </View>
+
+          <View style={s.dashSection}>
+            <Text style={s.dashSectionTitle}>Usuários</Text>
+            <View style={s.statRow}>
+              <StatCard label="Passageiros" value={adminStats?.totalClients ?? 0} color={colors.primary} />
+              <StatCard label="Motoristas" value={adminStats?.totalDrivers ?? 0} color={colors.statusAccepted} />
+              <StatCard label="Total" value={adminStats?.totalUsers ?? 0} color={colors.foreground} />
+              <StatCard
+                label="Avaliação"
+                value={(adminStats?.avgRating ?? 0) > 0 ? `${(adminStats!.avgRating).toFixed(1)}★` : "—"}
+                color={colors.primary}
+              />
+            </View>
+          </View>
+
+          <View style={s.dashSection}>
+            <Text style={s.dashSectionTitle}>Ações de administrador</Text>
+            <View style={s.dangerCard}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.dangerCardTitle}>Limpar histórico de corridas</Text>
+                <Text style={s.dangerCardSub}>Remove todas as corridas do sistema permanentemente</Text>
+              </View>
+              {confirmClearRides ? (
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <TouchableOpacity style={[s.dangerBtnConfirm]} onPress={handleClearRides} disabled={clearingRides}>
+                    {clearingRides ? <ActivityIndicator size="small" color={colors.destructive} /> : (
+                      <Text style={s.dangerBtnTextAlt}>Confirmar</Text>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[s.confirmBtn, { backgroundColor: colors.muted }]} onPress={() => setConfirmClearRides(false)}>
+                    <Text style={[s.confirmBtnText, { color: colors.mutedForeground }]}>Não</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <TouchableOpacity style={s.dangerBtn} onPress={handleClearRides}>
+                  <Feather name="trash-2" size={15} color="#fff" />
+                  <Text style={s.dangerBtnText}>Limpar</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        </ScrollView>
       ) : tab === "pricing" ? (
         <FlatList
           style={s.pricingContent}
@@ -293,7 +526,7 @@ export default function AdminHome() {
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                   <TouchableOpacity
                     style={[s.confirmBtn, { backgroundColor: colors.destructive }]}
-                    onPress={() => confirmDeletePrice(item.id)}
+                    onPress={() => { setPendingDeleteId(null); deletePricingRule(item.id); }}
                   >
                     <Feather name="check" size={13} color="#fff" />
                     <Text style={s.confirmBtnText}>Remover</Text>
@@ -308,7 +541,7 @@ export default function AdminHome() {
               ) : (
                 <>
                   <Text style={s.priceValue}>R$ {item.price.toFixed(2).replace(".", ",")}</Text>
-                  <TouchableOpacity style={s.deleteBtn} onPress={() => handleDeletePrice(item)}>
+                  <TouchableOpacity style={s.deleteBtn} onPress={() => setPendingDeleteId(item.id)}>
                     <Feather name="trash-2" size={16} color={colors.destructive} />
                   </TouchableOpacity>
                 </>

@@ -17,6 +17,22 @@ import { UserAvatar } from "@/components/UserAvatar";
 import { RatingModal } from "@/components/RatingModal";
 import type { Ride } from "@/context/AppContext";
 
+function StarRating({ rating, size = 14 }: { rating: number; size?: number }) {
+  const colors = useColors();
+  return (
+    <View style={{ flexDirection: "row", gap: 2 }}>
+      {[1, 2, 3, 4, 5].map((s) => (
+        <Feather
+          key={s}
+          name="star"
+          size={size}
+          color={s <= Math.round(rating) ? colors.primary : colors.border}
+        />
+      ))}
+    </View>
+  );
+}
+
 function RideCard({ ride, onAccept, onDecline, compact }: {
   ride: Ride; onAccept: () => void; onDecline: () => void; compact?: boolean;
 }) {
@@ -36,8 +52,7 @@ function RideCard({ ride, onAccept, onDecline, compact }: {
     card: {
       backgroundColor: colors.card, borderRadius: colors.radius,
       padding: compact ? 12 : 18, marginBottom: 10, borderWidth: 1,
-      borderColor: compact ? colors.border : colors.border,
-      opacity: compact ? 0.75 : 1,
+      borderColor: colors.border, opacity: compact ? 0.75 : 1,
     },
     badge: {
       alignSelf: "flex-start", backgroundColor: colors.statusWaiting + "22",
@@ -48,9 +63,6 @@ function RideCard({ ride, onAccept, onDecline, compact }: {
     clientRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: compact ? 8 : 14 },
     clientName: { fontSize: compact ? 15 : 18, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold" },
     clientPhone: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
-    clientRatingRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
-    clientRatingText: { fontSize: 12, color: colors.statusWaiting, fontFamily: "Inter_600SemiBold" },
-    clientRatingCount: { fontSize: 11, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
     row: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6 },
     dot: { width: 8, height: 8, borderRadius: 4 },
     routeText: { fontSize: compact ? 13 : 14, color: colors.foreground, flex: 1, fontFamily: "Inter_400Regular" },
@@ -88,16 +100,16 @@ function RideCard({ ride, onAccept, onDecline, compact }: {
             <Text style={s.clientName}>{ride.clientName}</Text>
             {!compact && <Text style={s.clientPhone}>{ride.clientPhone}</Text>}
             {(ride.clientAvgRating ?? 0) > 0 ? (
-              <View style={s.clientRatingRow}>
-                <Feather name="star" size={12} color={colors.statusWaiting} />
-                <Text style={s.clientRatingText}>{ride.clientAvgRating!.toFixed(1)}</Text>
-                <Text style={s.clientRatingCount}>({ride.clientRideCount} corridas)</Text>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 }}>
+                <StarRating rating={ride.clientAvgRating!} size={12} />
+                <Text style={{ fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular" }}>
+                  {ride.clientAvgRating!.toFixed(1)} ({ride.clientRideCount} corridas)
+                </Text>
               </View>
             ) : (
-              <View style={s.clientRatingRow}>
-                <Feather name="star" size={12} color={colors.mutedForeground} />
-                <Text style={s.clientRatingCount}>Sem avaliações ainda</Text>
-              </View>
+              <Text style={{ fontSize: 11, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2 }}>
+                Sem avaliações ainda
+              </Text>
             )}
           </View>
         </View>
@@ -155,7 +167,6 @@ export default function DriverHome() {
     fetchMyRides();
   }, []);
 
-  // Remove declined rides that are no longer in pendingRides (accepted by another driver or cancelled)
   useEffect(() => {
     const pendingIds = new Set(pendingRides.map((r) => r.id));
     setDeclinedIds((prev) => {
@@ -190,45 +201,63 @@ export default function DriverHome() {
 
   const activeRides = pendingRides.filter((r) => !declinedIds.has(r.id));
   const declinedRides = pendingRides.filter((r) => declinedIds.has(r.id));
-
   const totalEarned = myRides.reduce((sum, r) => sum + (r.price ?? 0), 0);
+  const rating = user?.rating ?? 0;
+  const rideCount = user?.rideCount ?? 0;
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
     header: {
       paddingTop: Platform.OS === "web" ? 67 : insets.top + 8,
-      paddingHorizontal: 24, paddingBottom: 20,
+      paddingHorizontal: 24, paddingBottom: 16,
     },
-    topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 },
+    topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
     driverInfo: { flexDirection: "row", alignItems: "center", gap: 12 },
-    userName: { fontSize: 20, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold" },
+    userName: { fontSize: 18, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold" },
     userSub: { fontSize: 13, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
     headerActions: { flexDirection: "row", alignItems: "center", gap: 10 },
+    // Stats row
+    statsRow: { flexDirection: "row", gap: 10, marginBottom: 14 },
+    statCard: {
+      flex: 1, backgroundColor: colors.card, borderRadius: 12, padding: 12,
+      alignItems: "center", borderWidth: 1, borderColor: colors.border,
+    },
+    statValue: { fontSize: 18, fontWeight: "900", fontFamily: "Inter_700Bold" },
+    statLabel: { fontSize: 10, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2, textAlign: "center" },
+    ratingCard: {
+      backgroundColor: colors.primary + "18", borderRadius: 12, padding: 12,
+      borderWidth: 1, borderColor: colors.primary + "44",
+      flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14,
+    },
+    ratingLeft: {},
+    ratingLabel: { fontSize: 11, color: colors.primary + "cc", fontFamily: "Inter_500Medium", marginBottom: 4 },
+    ratingValue: { fontSize: 26, fontWeight: "900", color: colors.primary, fontFamily: "Inter_700Bold" },
+    ratingCount: { fontSize: 11, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2 },
     statusToggle: {
-      borderRadius: 24, paddingVertical: 18, paddingHorizontal: 28,
-      flexDirection: "row", alignItems: "center", gap: 14,
+      borderRadius: 20, paddingVertical: 14, paddingHorizontal: 22,
+      flexDirection: "row", alignItems: "center", gap: 12,
     },
     toggleIcon: {
-      width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(0,0,0,0.2)",
+      width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(0,0,0,0.2)",
       alignItems: "center", justifyContent: "center",
     },
-    toggleLabel: { fontSize: 20, fontWeight: "800", color: "#fff", fontFamily: "Inter_700Bold" },
-    toggleSub: { fontSize: 13, color: "rgba(255,255,255,0.7)", fontFamily: "Inter_400Regular" },
+    toggleLabel: { fontSize: 18, fontWeight: "800", color: "#fff", fontFamily: "Inter_700Bold" },
+    toggleSub: { fontSize: 12, color: "rgba(255,255,255,0.7)", fontFamily: "Inter_400Regular" },
     content: { flex: 1, paddingHorizontal: 24 },
     sectionTitle: {
       fontSize: 13, color: colors.mutedForeground, fontFamily: "Inter_500Medium",
       letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 12,
     },
-    empty: { alignItems: "center", paddingVertical: 48, gap: 12 },
+    empty: { alignItems: "center", paddingVertical: 40, gap: 12 },
     emptyText: { fontSize: 16, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
     activeCard: {
-      backgroundColor: colors.card, borderRadius: colors.radius, padding: 22,
-      borderWidth: 2, borderColor: colors.statusInProgress, marginBottom: 16,
+      backgroundColor: colors.card, borderRadius: colors.radius, padding: 20,
+      borderWidth: 2, borderColor: colors.statusInProgress, marginBottom: 14,
     },
-    activeBadge: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 },
-    activeBadgeText: { fontSize: 16, fontWeight: "700", color: colors.statusInProgress, fontFamily: "Inter_700Bold" },
-    clientRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 14 },
-    clientName: { fontSize: 20, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold" },
+    activeBadge: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 14 },
+    activeBadgeText: { fontSize: 15, fontWeight: "700", color: colors.statusInProgress, fontFamily: "Inter_700Bold" },
+    clientRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 },
+    clientName: { fontSize: 18, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold" },
     clientPhone: { fontSize: 13, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
     row: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
     dot: { width: 8, height: 8, borderRadius: 4 },
@@ -240,10 +269,10 @@ export default function DriverHome() {
     },
     priceText: { fontSize: 16, fontWeight: "700", color: colors.statusAccepted, fontFamily: "Inter_700Bold" },
     payText: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_500Medium" },
-    activeActions: { flexDirection: "row", gap: 10, marginTop: 16 },
+    activeActions: { flexDirection: "row", gap: 10, marginTop: 14 },
     chatBtnWrap: { position: "relative", flex: 1 },
     chatBtn: {
-      flex: 1, backgroundColor: colors.muted, borderRadius: 14, paddingVertical: 16,
+      flex: 1, backgroundColor: colors.muted, borderRadius: 14, paddingVertical: 14,
       alignItems: "center", borderWidth: 1, borderColor: colors.border,
       flexDirection: "row", justifyContent: "center", gap: 8,
     },
@@ -256,16 +285,16 @@ export default function DriverHome() {
     },
     chatBadgeText: { fontSize: 11, color: "#fff", fontWeight: "700", fontFamily: "Inter_700Bold" },
     finishBtn: {
-      flex: 1, backgroundColor: colors.statusAccepted, borderRadius: 14, paddingVertical: 16,
+      flex: 1, backgroundColor: colors.statusAccepted, borderRadius: 14, paddingVertical: 14,
       alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8,
     },
     finishBtnConfirm: {
-      flex: 1, backgroundColor: colors.destructive, borderRadius: 14, paddingVertical: 16,
+      flex: 1, backgroundColor: colors.destructive, borderRadius: 14, paddingVertical: 14,
       alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8,
     },
     finishText: { fontSize: 16, fontWeight: "700", color: "#fff", fontFamily: "Inter_700Bold" },
     cancelConfirmBtn: {
-      flex: 1, backgroundColor: colors.muted, borderRadius: 14, paddingVertical: 16,
+      flex: 1, backgroundColor: colors.muted, borderRadius: 14, paddingVertical: 14,
       alignItems: "center", borderWidth: 1, borderColor: colors.border,
     },
     cancelConfirmText: { fontSize: 14, color: colors.mutedForeground, fontFamily: "Inter_500Medium" },
@@ -301,88 +330,90 @@ export default function DriverHome() {
     totalValue: { fontSize: 20, fontWeight: "900", color: colors.statusAccepted, fontFamily: "Inter_700Bold" },
   });
 
-  const listHeader = activeRide ? (
+  const listHeader = (
     <View>
-      <Text style={s.sectionTitle}>Corrida ativa</Text>
-      <View style={s.activeCard}>
-        <View style={s.activeBadge}>
-          <Feather name="navigation" size={16} color={colors.statusInProgress} />
-          <Text style={s.activeBadgeText}>Em andamento</Text>
-        </View>
-        <View style={s.clientRow}>
-          <UserAvatar name={activeRide.clientName} photo={activeRide.clientPhoto} size={52} mode="client" />
-          <View>
-            <Text style={s.clientName}>{activeRide.clientName}</Text>
-            <Text style={s.clientPhone}>{activeRide.clientPhone}</Text>
-            {(activeRide.clientAvgRating ?? 0) > 0 ? (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 }}>
-                <Feather name="star" size={12} color={colors.statusWaiting} />
-                <Text style={{ fontSize: 12, color: colors.statusWaiting, fontFamily: "Inter_600SemiBold" }}>
-                  {activeRide.clientAvgRating!.toFixed(1)} · {activeRide.clientRideCount} corridas
-                </Text>
+      {activeRide && (
+        <View>
+          <Text style={s.sectionTitle}>Corrida ativa</Text>
+          <View style={s.activeCard}>
+            <View style={s.activeBadge}>
+              <Feather name="navigation" size={16} color={colors.statusInProgress} />
+              <Text style={s.activeBadgeText}>Em andamento</Text>
+            </View>
+            <View style={s.clientRow}>
+              <UserAvatar name={activeRide.clientName} photo={activeRide.clientPhoto} size={50} mode="client" />
+              <View>
+                <Text style={s.clientName}>{activeRide.clientName}</Text>
+                <Text style={s.clientPhone}>{activeRide.clientPhone}</Text>
+                {(activeRide.clientAvgRating ?? 0) > 0 ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 }}>
+                    <StarRating rating={activeRide.clientAvgRating!} size={12} />
+                    <Text style={{ fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular" }}>
+                      {activeRide.clientAvgRating!.toFixed(1)}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={{ fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2 }}>
+                    Novo passageiro
+                  </Text>
+                )}
               </View>
-            ) : (
-              <Text style={{ fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2 }}>
-                Novo passageiro
-              </Text>
-            )}
-          </View>
-        </View>
-        <View style={s.row}>
-          <View style={[s.dot, { backgroundColor: colors.statusAccepted }]} />
-          <Text style={s.routeText}>{activeRide.origin}</Text>
-        </View>
-        <View style={s.row}>
-          <View style={[s.dot, { backgroundColor: colors.statusInProgress }]} />
-          <Text style={s.routeText}>{activeRide.destination}</Text>
-        </View>
-        {activeRide.price !== undefined && (
-          <View style={s.priceRow}>
-            <Feather name="dollar-sign" size={14} color={colors.statusAccepted} />
-            <Text style={s.priceText}>R$ {activeRide.price.toFixed(2).replace(".", ",")}</Text>
-            <Text style={s.payText}>· {activeRide.payment === "pix" ? "PIX" : "Dinheiro"}</Text>
-          </View>
-        )}
-        <View style={s.activeActions}>
-          <View style={s.chatBtnWrap}>
-            <TouchableOpacity style={s.chatBtn} onPress={() => router.push("/chat")}>
-              <Feather name="message-circle" size={18} color={colors.foreground} />
-              <Text style={s.chatText}>Chat</Text>
-            </TouchableOpacity>
-            {unreadChatCount > 0 && (
-              <View style={s.chatBadge}>
-                <Text style={s.chatBadgeText}>{unreadChatCount > 99 ? "99+" : unreadChatCount}</Text>
+            </View>
+            <View style={s.row}>
+              <View style={[s.dot, { backgroundColor: colors.statusAccepted }]} />
+              <Text style={s.routeText}>{activeRide.origin}</Text>
+            </View>
+            <View style={s.row}>
+              <View style={[s.dot, { backgroundColor: colors.statusInProgress }]} />
+              <Text style={s.routeText}>{activeRide.destination}</Text>
+            </View>
+            {activeRide.price !== undefined && (
+              <View style={s.priceRow}>
+                <Feather name="dollar-sign" size={14} color={colors.statusAccepted} />
+                <Text style={s.priceText}>R$ {activeRide.price.toFixed(2).replace(".", ",")}</Text>
+                <Text style={s.payText}>· {activeRide.payment === "pix" ? "PIX" : "Dinheiro"}</Text>
               </View>
             )}
+            <View style={s.activeActions}>
+              <View style={s.chatBtnWrap}>
+                <TouchableOpacity style={s.chatBtn} onPress={() => router.push("/chat")}>
+                  <Feather name="message-circle" size={18} color={colors.foreground} />
+                  <Text style={s.chatText}>Chat</Text>
+                </TouchableOpacity>
+                {unreadChatCount > 0 && (
+                  <View style={s.chatBadge}>
+                    <Text style={s.chatBadgeText}>{unreadChatCount > 99 ? "99+" : unreadChatCount}</Text>
+                  </View>
+                )}
+              </View>
+              {confirmingFinish ? (
+                <>
+                  <TouchableOpacity style={s.finishBtnConfirm} onPress={handleFinish}>
+                    <Feather name="flag" size={18} color="#fff" />
+                    <Text style={s.finishText}>Confirmar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.cancelConfirmBtn} onPress={() => setConfirmingFinish(false)}>
+                    <Text style={s.cancelConfirmText}>Voltar</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity style={s.finishBtn} onPress={handleFinish}>
+                  <Feather name="flag" size={18} color="#fff" />
+                  <Text style={s.finishText}>Finalizar</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
-          {confirmingFinish ? (
-            <>
-              <TouchableOpacity style={s.finishBtnConfirm} onPress={handleFinish}>
-                <Feather name="flag" size={18} color="#fff" />
-                <Text style={s.finishText}>Confirmar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.cancelConfirmBtn} onPress={() => setConfirmingFinish(false)}>
-                <Text style={s.cancelConfirmText}>Voltar</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <TouchableOpacity style={s.finishBtn} onPress={handleFinish}>
-              <Feather name="flag" size={18} color="#fff" />
-              <Text style={s.finishText}>Finalizar</Text>
-            </TouchableOpacity>
+          {activeRides.length > 0 && (
+            <Text style={[s.sectionTitle, { marginTop: 4 }]}>Novas corridas</Text>
           )}
         </View>
-      </View>
-      {activeRides.length > 0 && (
-        <Text style={[s.sectionTitle, { marginTop: 8 }]}>Novas corridas</Text>
       )}
-      {declinedRides.length > 0 && activeRides.length === 0 && (
-        <Text style={[s.sectionTitle, { marginTop: 8 }]}>Corridas em espera</Text>
+      {!activeRide && isDriverOnline && activeRides.length > 0 && (
+        <Text style={s.sectionTitle}>Novas corridas</Text>
       )}
     </View>
-  ) : isDriverOnline && activeRides.length > 0 ? (
-    <Text style={s.sectionTitle}>Novas corridas</Text>
-  ) : null;
+  );
 
   return (
     <View style={s.container}>
@@ -395,22 +426,41 @@ export default function DriverHome() {
             </TouchableOpacity>
             <View>
               <Text style={s.userName}>{user?.name}</Text>
-              {(user?.rating ?? 0) > 0 ? (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
-                  <Feather name="star" size={11} color={colors.primary} />
-                  <Text style={[s.userSub, { color: colors.primary }]}>
-                    {user!.rating!.toFixed(1)} · {user!.rideCount} corridas
-                  </Text>
-                </View>
-              ) : (
-                <Text style={s.userSub}>Motorista</Text>
-              )}
+              <Text style={s.userSub}>Motorista</Text>
             </View>
           </View>
-          <View style={s.headerActions}>
-            <TouchableOpacity style={{ padding: 8 }} onPress={logout}>
-              <Feather name="log-out" size={22} color={colors.mutedForeground} />
-            </TouchableOpacity>
+          <TouchableOpacity style={{ padding: 8 }} onPress={logout}>
+            <Feather name="log-out" size={22} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Stats row */}
+        <View style={s.statsRow}>
+          <View style={s.statCard}>
+            <Text style={[s.statValue, { color: colors.statusAccepted }]}>
+              R$ {totalEarned.toFixed(0)}
+            </Text>
+            <Text style={s.statLabel}>Total ganho</Text>
+          </View>
+          <View style={s.statCard}>
+            <Text style={[s.statValue, { color: colors.primary }]}>{myRides.length}</Text>
+            <Text style={s.statLabel}>Corridas</Text>
+          </View>
+          <View style={[s.statCard, { backgroundColor: colors.primary + "18", borderColor: colors.primary + "44" }]}>
+            {rating > 0 ? (
+              <>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <Feather name="star" size={14} color={colors.primary} />
+                  <Text style={[s.statValue, { color: colors.primary, fontSize: 20 }]}>{rating.toFixed(1)}</Text>
+                </View>
+                <Text style={[s.statLabel, { color: colors.primary }]}>{rideCount} avaliações</Text>
+              </>
+            ) : (
+              <>
+                <Feather name="star" size={18} color={colors.mutedForeground} />
+                <Text style={s.statLabel}>Sem avaliações</Text>
+              </>
+            )}
           </View>
         </View>
 
@@ -456,7 +506,6 @@ export default function DriverHome() {
                 ))}
               </View>
             )}
-
             {myRides.length > 0 && (
               <View>
                 <TouchableOpacity style={s.historyToggle} onPress={() => setShowHistory((v) => !v)}>
