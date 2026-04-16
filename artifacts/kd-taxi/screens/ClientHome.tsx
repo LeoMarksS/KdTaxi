@@ -57,10 +57,11 @@ export default function ClientHome() {
   const [destination, setDestination] = useState("");
   const [payment, setPayment] = useState<"pix" | "dinheiro">("dinheiro");
   const [loading, setLoading] = useState(false);
-  const [price, setPrice] = useState<number | null>(null);
+  const [priceResult, setPriceResult] = useState<{ price: number; isLocal: boolean } | null>(null);
   const [priceLookingUp, setPriceLookingUp] = useState(false);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showAmount, setShowAmount] = useState(true);
 
   const pulseScale = useSharedValue(1);
 
@@ -86,11 +87,11 @@ export default function ClientHome() {
   const pulseStyle = useAnimatedStyle(() => ({ transform: [{ scale: pulseScale.value }] }));
 
   useEffect(() => {
-    if (!destination.trim() || destination.trim().length < 3) { setPrice(null); return; }
+    if (!destination.trim() || destination.trim().length < 3) { setPriceResult(null); return; }
     const timer = setTimeout(async () => {
       setPriceLookingUp(true);
       const p = await lookupPrice(destination.trim());
-      setPrice(p);
+      setPriceResult(p);
       setPriceLookingUp(false);
     }, 600);
     return () => clearTimeout(timer);
@@ -281,12 +282,19 @@ export default function ClientHome() {
 
         {/* Stats row */}
         <View style={s.statsRow}>
-          <View style={s.statCard}>
-            <Text style={[s.statValue, { color: colors.destructive }]}>
-              R$ {totalSpent.toFixed(0)}
-            </Text>
+          <TouchableOpacity
+            style={s.statCard}
+            onPress={() => { setShowAmount((v) => !v); Haptics.selectionAsync(); }}
+            activeOpacity={0.8}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+              <Text style={[s.statValue, { color: colors.destructive }]}>
+                {showAmount ? `R$ ${totalSpent.toFixed(0)}` : "• • •"}
+              </Text>
+              <Feather name={showAmount ? "eye" : "eye-off"} size={12} color={colors.mutedForeground} />
+            </View>
             <Text style={s.statLabel}>Total gasto</Text>
-          </View>
+          </TouchableOpacity>
           <View style={s.statCard}>
             <Text style={[s.statValue, { color: colors.primary }]}>{myRides.length}</Text>
             <Text style={s.statLabel}>Corridas</Text>
@@ -351,14 +359,23 @@ export default function ClientHome() {
                   />
                 </View>
 
-                {(price !== null || priceLookingUp) && (
+                {(priceResult !== null || priceLookingUp) && (
                   <View style={s.priceRow}>
-                    <Text style={s.priceLabel}>Valor da corrida</Text>
+                    <View>
+                      <Text style={s.priceLabel}>
+                        {priceResult?.isLocal ? "Corrida local (preço fixo)" : "Valor da corrida"}
+                      </Text>
+                      {priceResult?.isLocal && (
+                        <Text style={[s.priceLabel, { fontSize: 10, color: colors.primary + "cc", marginTop: 1 }]}>
+                          Dentro da cidade
+                        </Text>
+                      )}
+                    </View>
                     {priceLookingUp ? (
                       <ActivityIndicator size="small" color={colors.primary} />
                     ) : (
-                      <Text style={s.priceValue}>
-                        R$ {price!.toFixed(2).replace(".", ",")}
+                      <Text style={[s.priceValue, { color: priceResult?.isLocal ? colors.primary : colors.statusAccepted }]}>
+                        R$ {priceResult!.price.toFixed(2).replace(".", ",")}
                       </Text>
                     )}
                   </View>
@@ -417,10 +434,19 @@ export default function ClientHome() {
                   </TouchableOpacity>
                   {showHistory && (
                     <View>
-                      <View style={s.totalCard}>
+                      <TouchableOpacity
+                        style={s.totalCard}
+                        onPress={() => setShowAmount((v) => !v)}
+                        activeOpacity={0.8}
+                      >
                         <Text style={s.totalLabel}>Total gasto</Text>
-                        <Text style={s.totalValue}>R$ {totalSpent.toFixed(2).replace(".", ",")}</Text>
-                      </View>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                          <Text style={s.totalValue}>
+                            {showAmount ? `R$ ${totalSpent.toFixed(2).replace(".", ",")}` : "• • •"}
+                          </Text>
+                          <Feather name={showAmount ? "eye" : "eye-off"} size={14} color={colors.destructive + "88"} />
+                        </View>
+                      </TouchableOpacity>
                       {myRides.map((ride) => (
                         <View key={ride.id} style={s.historyCard}>
                           {ride.driverName && <Text style={s.historyDriver}>Motorista: {ride.driverName}</Text>}

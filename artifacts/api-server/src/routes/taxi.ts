@@ -46,6 +46,7 @@ interface PriceRule {
   id: string;
   destination: string;
   price: number;
+  isLocal?: boolean;
   createdAt: string;
 }
 
@@ -81,14 +82,19 @@ async function sendPushNotification(token: string, title: string, body: string, 
   } catch (_) {}
 }
 
-function lookupPrice(destination: string): number | undefined {
+function lookupPrice(destination: string): { price: number; isLocal: boolean } | undefined {
   const dest = destination.toLowerCase().trim();
+  // First try to match specific (non-local) pricing rules
   for (const rule of pricing.values()) {
+    if (rule.isLocal) continue;
     if (dest.includes(rule.destination.toLowerCase().trim()) ||
         rule.destination.toLowerCase().trim().includes(dest)) {
-      return rule.price;
+      return { price: rule.price, isLocal: false };
     }
   }
+  // Fallback: use local/intra-city price if configured
+  const localRule = Array.from(pricing.values()).find((r) => r.isLocal);
+  if (localRule) return { price: localRule.price, isLocal: true };
   return undefined;
 }
 
@@ -256,7 +262,8 @@ router.post("/request-ride", async (req: Request, res: Response) => {
   };
   if (!clientId || !origin || !destination) { res.status(400).json({ error: "Missing required fields" }); return; }
 
-  const price = lookupPrice(destination);
+  const priceResult = lookupPrice(destination);
+  const price = priceResult?.price;
   const client = users.get(clientId);
   const ride: Ride = {
     id: getId(), clientId, clientName, clientPhone, clientPhoto,
@@ -382,11 +389,26 @@ router.get("/pricing", (_req: Request, res: Response) => {
 
 // POST /pricing
 router.post("/pricing", (req: Request, res: Response) => {
-  const { destination, price } = req.body as { destination: string; price: number };
+  const { destination, price, isLocal } = req.body as { destination: string; price: number; isLocal?: boolean };
   if (!destination || price === undefined) { res.status(400).json({ error: "Missing fields" }); return; }
 
+  if (isLocal) {
+    // Only one local rule allowed — upsert it
+    const existing = Array.from(pricing.values()).find((p) => p.isLocal);
+    if (existing) {
+      existing.price = price;
+      existing.destination = destination.trim();
+      res.json(existing);
+      return;
+    }
+    const rule: PriceRule = { id: "local-price", destination: destination.trim(), price, isLocal: true, createdAt: new Date().toISOString() };
+    pricing.set(rule.id, rule);
+    res.json(rule);
+    return;
+  }
+
   const existing = Array.from(pricing.values()).find(
-    (p) => p.destination.toLowerCase() === destination.toLowerCase()
+    (p) => !p.isLocal && p.destination.toLowerCase() === destination.toLowerCase()
   );
   if (existing) {
     existing.price = price;
@@ -408,8 +430,8 @@ router.delete("/pricing/:id", (req: Request, res: Response) => {
 // GET /pricing/lookup?destination=xxx
 router.get("/pricing/lookup", (req: Request, res: Response) => {
   const destination = (req.query.destination as string) ?? "";
-  const price = lookupPrice(destination);
-  res.json({ price: price ?? null });
+  const result = lookupPrice(destination);
+  res.json({ price: result?.price ?? null, isLocal: result?.isLocal ?? false });
 });
 
 export default router;

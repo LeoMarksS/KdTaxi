@@ -65,6 +65,7 @@ export interface PriceRule {
   id: string;
   destination: string;
   price: number;
+  isLocal?: boolean;
 }
 
 export interface AdminStats {
@@ -111,9 +112,9 @@ interface AppContextValue {
   refreshAdminData: () => Promise<void>;
   refreshAdminStats: () => Promise<void>;
   refreshPricing: () => Promise<void>;
-  setPricingRule: (destination: string, price: number) => Promise<void>;
+  setPricingRule: (destination: string, price: number, isLocal?: boolean) => Promise<void>;
   deletePricingRule: (id: string) => Promise<void>;
-  lookupPrice: (destination: string) => Promise<number | null>;
+  lookupPrice: (destination: string) => Promise<{ price: number; isLocal: boolean } | null>;
   finishedRideToRate: Ride | null;
   clearFinishedRideToRate: () => void;
   // Admin operations
@@ -478,11 +479,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (res.ok) setPricing(await res.json());
   }, []);
 
-  const setPricingRule = useCallback(async (destination: string, price: number) => {
+  const setPricingRule = useCallback(async (destination: string, price: number, isLocal?: boolean) => {
     await fetch(`${API_BASE}/pricing`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ destination, price }),
+      body: JSON.stringify({ destination, price, isLocal }),
     });
     await refreshPricing();
   }, [refreshPricing]);
@@ -492,10 +493,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await refreshPricing();
   }, [refreshPricing]);
 
-  const lookupPrice = useCallback(async (destination: string): Promise<number | null> => {
+  const lookupPrice = useCallback(async (destination: string): Promise<{ price: number; isLocal: boolean } | null> => {
     try {
       const res = await fetch(`${API_BASE}/pricing/lookup?destination=${encodeURIComponent(destination)}`);
-      if (res.ok) { const d = await res.json(); return d.price; }
+      if (res.ok) {
+        const d = await res.json();
+        if (d.price !== null && d.price !== undefined) return { price: d.price, isLocal: d.isLocal ?? false };
+      }
     } catch {}
     return null;
   }, []);

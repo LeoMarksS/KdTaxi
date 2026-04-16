@@ -156,6 +156,7 @@ export default function DriverHome() {
   const [declinedIds, setDeclinedIds] = useState<Set<string>>(new Set());
   const [confirmingFinish, setConfirmingFinish] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showAmount, setShowAmount] = useState(true);
 
   const toggleAnim = useSharedValue(isDriverOnline ? 1 : 0);
 
@@ -436,12 +437,19 @@ export default function DriverHome() {
 
         {/* Stats row */}
         <View style={s.statsRow}>
-          <View style={s.statCard}>
-            <Text style={[s.statValue, { color: colors.statusAccepted }]}>
-              R$ {totalEarned.toFixed(0)}
-            </Text>
+          <TouchableOpacity
+            style={s.statCard}
+            onPress={() => { setShowAmount((v) => !v); Haptics.selectionAsync(); }}
+            activeOpacity={0.8}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+              <Text style={[s.statValue, { color: colors.statusAccepted }]}>
+                {showAmount ? `R$ ${totalEarned.toFixed(0)}` : "• • •"}
+              </Text>
+              <Feather name={showAmount ? "eye" : "eye-off"} size={12} color={colors.mutedForeground} />
+            </View>
             <Text style={s.statLabel}>Total ganho</Text>
-          </View>
+          </TouchableOpacity>
           <View style={s.statCard}>
             <Text style={[s.statValue, { color: colors.primary }]}>{myRides.length}</Text>
             <Text style={s.statLabel}>Corridas</Text>
@@ -517,10 +525,19 @@ export default function DriverHome() {
                 </TouchableOpacity>
                 {showHistory && (
                   <View>
-                    <View style={s.totalCard}>
+                    <TouchableOpacity
+                      style={s.totalCard}
+                      onPress={() => setShowAmount((v) => !v)}
+                      activeOpacity={0.8}
+                    >
                       <Text style={s.totalLabel}>Total ganho</Text>
-                      <Text style={s.totalValue}>R$ {totalEarned.toFixed(2).replace(".", ",")}</Text>
-                    </View>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <Text style={s.totalValue}>
+                          {showAmount ? `R$ ${totalEarned.toFixed(2).replace(".", ",")}` : "• • •"}
+                        </Text>
+                        <Feather name={showAmount ? "eye" : "eye-off"} size={14} color={colors.statusAccepted + "88"} />
+                      </View>
+                    </TouchableOpacity>
                     {myRides.map((ride) => (
                       <View key={ride.id} style={s.historyCard}>
                         <Text style={s.historyClient}>Passageiro: {ride.clientName}</Text>

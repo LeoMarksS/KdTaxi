@@ -158,6 +158,9 @@ export default function AdminHome() {
   const [newCity, setNewCity] = useState("");
   const [newPrice, setNewPrice] = useState("");
   const [savingPrice, setSavingPrice] = useState(false);
+  const [localCityName, setLocalCityName] = useState("");
+  const [localPriceValue, setLocalPriceValue] = useState("");
+  const [savingLocalPrice, setSavingLocalPrice] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [confirmClearRides, setConfirmClearRides] = useState(false);
@@ -172,6 +175,15 @@ export default function AdminHome() {
     }, 6000);
     return () => clearInterval(interval);
   }, []);
+
+  // Sync local price fields when pricing loads
+  useEffect(() => {
+    const localRule = pricing.find((p) => p.isLocal);
+    if (localRule) {
+      setLocalCityName(localRule.destination);
+      setLocalPriceValue(localRule.price.toFixed(2));
+    }
+  }, [pricing]);
 
   const statusColors: Record<string, string> = {
     waiting: colors.statusWaiting, accepted: colors.statusAccepted,
@@ -190,6 +202,23 @@ export default function AdminHome() {
     await setPricingRule(newCity.trim(), price);
     setNewCity(""); setNewPrice("");
     setSavingPrice(false);
+  };
+
+  const handleSaveLocalPrice = async () => {
+    if (!localCityName.trim() || !localPriceValue.trim()) return;
+    const price = parseFloat(localPriceValue.replace(",", "."));
+    if (isNaN(price) || price <= 0) return;
+    setSavingLocalPrice(true);
+    await setPricingRule(localCityName.trim(), price, true);
+    setSavingLocalPrice(false);
+  };
+
+  const handleDeleteLocalPrice = async () => {
+    const localRule = pricing.find((p) => p.isLocal);
+    if (!localRule) return;
+    await deletePricingRule(localRule.id);
+    setLocalCityName("");
+    setLocalPriceValue("");
   };
 
   const handleClearRides = async () => {
@@ -477,14 +506,63 @@ export default function AdminHome() {
         <FlatList
           style={s.pricingContent}
           contentContainerStyle={{ paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 24 }}
-          data={pricing}
+          data={pricing.filter((p) => !p.isLocal)}
           keyExtractor={(r) => r.id}
           ListHeaderComponent={
             <View>
+              {/* Local city price */}
+              <View style={[s.addCard, { borderColor: colors.primary + "44", backgroundColor: colors.primary + "0A" }]}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                  <MaterialCommunityIcons name="home-city" size={22} color={colors.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.addTitle, { color: colors.primary, marginBottom: 0 }]}>Preço Local (dentro da cidade)</Text>
+                    <Text style={[s.pricingHint, { marginBottom: 0, marginTop: 2 }]}>
+                      Aplicado quando o destino não coincidir com nenhuma cidade específica
+                    </Text>
+                  </View>
+                </View>
+                <View style={s.inputRow}>
+                  <TextInput
+                    style={s.input} value={localCityName} onChangeText={setLocalCityName}
+                    placeholder="Nome da cidade local" placeholderTextColor={colors.mutedForeground}
+                  />
+                  <TextInput
+                    style={s.priceInput} value={localPriceValue} onChangeText={setLocalPriceValue}
+                    placeholder="R$" placeholderTextColor={colors.mutedForeground}
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+                <View style={{ flexDirection: "row", gap: 10 }}>
+                  <TouchableOpacity
+                    style={[s.addBtn, { flex: 2, backgroundColor: colors.primary, opacity: !localCityName.trim() || !localPriceValue.trim() ? 0.5 : 1 }]}
+                    onPress={handleSaveLocalPrice}
+                    disabled={savingLocalPrice || !localCityName.trim() || !localPriceValue.trim()}
+                  >
+                    {savingLocalPrice ? (
+                      <ActivityIndicator color="#000" size="small" />
+                    ) : (
+                      <>
+                        <Feather name="save" size={16} color="#000" />
+                        <Text style={s.addBtnText}>Salvar preço local</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                  {pricing.find((p) => p.isLocal) && (
+                    <TouchableOpacity
+                      style={[s.addBtn, { flex: 1, backgroundColor: colors.destructive + "22", borderWidth: 1, borderColor: colors.destructive }]}
+                      onPress={handleDeleteLocalPrice}
+                    >
+                      <Feather name="trash-2" size={16} color={colors.destructive} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+
+              {/* Out-of-city destinations */}
               <View style={s.addCard}>
-                <Text style={s.addTitle}>Adicionar / Atualizar destino</Text>
+                <Text style={s.addTitle}>Destinos fora da cidade</Text>
                 <Text style={s.pricingHint}>
-                  O preço é exibido automaticamente ao cliente quando o destino digitado coincidir com o nome da cidade cadastrada.
+                  O preço é exibido automaticamente ao cliente quando o destino digitado coincidir com o nome cadastrado.
                 </Text>
                 <View style={s.inputRow}>
                   <TextInput
@@ -507,12 +585,12 @@ export default function AdminHome() {
                   ) : (
                     <>
                       <Feather name="plus" size={18} color="#000" />
-                      <Text style={s.addBtnText}>Salvar preço</Text>
+                      <Text style={s.addBtnText}>Adicionar destino</Text>
                     </>
                   )}
                 </TouchableOpacity>
               </View>
-              {pricing.length > 0 && (
+              {pricing.filter((p) => !p.isLocal).length > 0 && (
                 <Text style={[s.pricingHint, { marginBottom: 10 }]}>Destinos cadastrados:</Text>
               )}
             </View>
