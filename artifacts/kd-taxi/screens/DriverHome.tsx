@@ -65,7 +65,7 @@ function RideCard({ ride, onAccept, onDecline, compact }: {
     clientPhone: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
     row: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6 },
     dot: { width: 8, height: 8, borderRadius: 4 },
-    routeText: { fontSize: compact ? 13 : 14, color: colors.foreground, flex: 1, fontFamily: "Inter_400Regular" },
+    routeText: { fontSize: compact ? 13 : 18, color: colors.foreground, flex: 1, fontFamily: "Inter_600SemiBold" },
     priceRow: {
       flexDirection: "row", alignItems: "center", gap: 8,
       backgroundColor: colors.statusAccepted + "15", borderRadius: 10,

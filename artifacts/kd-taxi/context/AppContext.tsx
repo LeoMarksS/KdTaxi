@@ -120,6 +120,8 @@ interface AppContextValue {
   adminUpdateUser: (id: string, data: { name?: string; phone?: string; mode?: string; active?: boolean; password?: string }) => Promise<boolean>;
   adminDeleteUser: (id: string) => Promise<boolean>;
   adminClearRides: () => Promise<boolean>;
+  // Chat open state
+  setChatOpen: (open: boolean) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -199,8 +201,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [finishedRideToRate, setFinishedRideToRate] = useState<Ride | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const userRef = useRef<User | null>(null);
+  const isDriverOnlineRef = useRef(false);
+  const isChatOpenRef = useRef(false);
 
   useEffect(() => { userRef.current = user; }, [user]);
+  useEffect(() => { isDriverOnlineRef.current = isDriverOnline; }, [isDriverOnline]);
 
   // Load persisted state
   useEffect(() => {
@@ -282,16 +287,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (exists) return prev;
           return [ride, ...prev];
         });
-        // Play custom alert sound
-        playRideRequestSound();
-        Notifications.scheduleNotificationAsync({
-          content: {
-            title: "Nova corrida!",
-            body: `${ride.clientName}: ${ride.origin} → ${ride.destination}`,
-            sound: true,
-          },
-          trigger: null,
-        }).catch(() => {});
+        // Only play sound and notify when driver is online
+        if (isDriverOnlineRef.current) {
+          playRideRequestSound();
+          Notifications.scheduleNotificationAsync({
+            content: {
+              title: "Nova corrida!",
+              body: `${ride.clientName}: ${ride.origin} → ${ride.destination}`,
+              sound: true,
+            },
+            trigger: null,
+          }).catch(() => {});
+        }
       }
     });
 
@@ -324,11 +331,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     socket.on("mensagem_chat", (msg: ChatMessage) => {
       setChatMessages((prev) => [...prev, msg]);
       if (msg.senderId !== userRef.current?.id) {
-        setUnreadChatCount((c) => c + 1);
-        Notifications.scheduleNotificationAsync({
-          content: { title: `Mensagem de ${msg.senderName}`, body: msg.text, sound: true },
-          trigger: null,
-        }).catch(() => {});
+        // Only increment badge and notify when chat screen is not open
+        if (!isChatOpenRef.current) {
+          setUnreadChatCount((c) => c + 1);
+          Notifications.scheduleNotificationAsync({
+            content: { title: `Mensagem de ${msg.senderName}`, body: msg.text, sound: true },
+            trigger: null,
+          }).catch(() => {});
+        }
       }
     });
 
@@ -530,6 +540,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return false;
   }, []);
 
+  const setChatOpen = useCallback((open: boolean) => {
+    isChatOpenRef.current = open;
+    if (open) setUnreadChatCount(0);
+  }, []);
+
   return (
     <AppContext.Provider value={{
       user, setUser, updateProfile,
@@ -545,6 +560,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setPricingRule, deletePricingRule, lookupPrice,
       finishedRideToRate, clearFinishedRideToRate: () => setFinishedRideToRate(null),
       adminUpdateUser, adminDeleteUser, adminClearRides,
+      setChatOpen,
     }}>
       {children}
     </AppContext.Provider>

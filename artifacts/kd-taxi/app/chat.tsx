@@ -86,16 +86,19 @@ function Message({ msg, isMe }: { msg: ChatMessage; isMe: boolean }) {
 export default function ChatScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, chatMessages, sendChatMessage, activeRide, markChatRead } = useApp();
+  const { user, chatMessages, sendChatMessage, activeRide, markChatRead, setChatOpen } = useApp();
   const [text, setText] = useState("");
   const flatRef = useRef<FlatList>(null);
 
-  // Mark all messages as read when this screen is focused
+  // Mark all messages as read and flag chat as open while this screen is focused
   useFocusEffect(
     useCallback(() => {
+      setChatOpen(true);
       markChatRead();
-      return () => {};
-    }, [markChatRead])
+      return () => {
+        setChatOpen(false);
+      };
+    }, [setChatOpen, markChatRead])
   );
 
   const handleSend = () => {
