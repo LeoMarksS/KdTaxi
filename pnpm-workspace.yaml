@@ -162,3 +162,19 @@ overrides:
   # Security: pin transitive dependency versions to patched releases
   lodash: ">=4.18.0"
   path-to-regexp: ">=8.4.0"
+  # GHSA-2v35, GHSA-f6ww, GHSA-j759, GHSA-x6wf: XML injection / DoS via comment, PI, doctype, recursion
+  "@xmldom/xmldom": "0.8.13"
+  # GHSA-q3j6, GHSA-v39h: path traversal and host confusion via percent-encoded segments
+  fast-uri: "3.1.2"
+  # GHSA-48c2: stack overflow via deeply nested YAML collections
+  yaml: "2.8.3"
+  # GHSA-qx2v: XSS via unescaped </style> in CSS stringify output
+  postcss: "8.5.10"
+  # GHSA-f886: zero-step sequence causes process hang / memory exhaustion (brace-expansion 2.x)
+  brace-expansion: "2.1.0"
+  # GHSA-jxxr: large numeric range defeats max DoS protection (brace-expansion 5.x via minimatch)
+  "minimatch>brace-expansion": "5.0.6"
+  # GHSA-58qx: uninitialized memory disclosure
+  ws: "8.20.1"
+  # GHSA-w5hq: predictable UUID generation (consumers are Expo dev-tool packages only)
+  uuid: "9.0.1"
