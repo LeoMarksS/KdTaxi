@@ -8,6 +8,7 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setBaseUrl } from "@workspace/api-client-react";
 import * as Notifications from "expo-notifications";
+import { Head } from "expo-router/head";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
@@ -35,12 +36,23 @@ const queryClient = new QueryClient();
 
 function RootLayoutNav() {
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <>
+      <Head>
+        <title>KD TAXI — Chame seu táxi agora</title>
+        <meta name="description" content="KD TAXI é o aplicativo de transporte para sua cidade. Chame um motorista em segundos, acompanhe em tempo real e pague um preço justo." />
+        <meta name="theme-color" content="#0D0D0D" />
+        <meta property="og:title" content="KD TAXI — Chame seu táxi agora" />
+        <meta property="og:description" content="KD TAXI é o aplicativo de transporte para sua cidade. Chame um motorista em segundos, acompanhe em tempo real e pague um preço justo." />
+        <meta property="og:type" content="website" />
+        <meta name="robots" content="index, follow" />
+      </Head>
+      <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="login" options={{ headerShown: false }} />
       <Stack.Screen name="chat" options={{ headerShown: false, presentation: "modal" }} />
       <Stack.Screen name="profile" options={{ headerShown: false, presentation: "modal" }} />
     </Stack>
+    </>
   );
 }
 
