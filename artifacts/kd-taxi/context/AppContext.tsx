@@ -304,9 +304,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
 
     socket.on("corrida_aceita", (ride: Ride) => {
-      setActiveRide(ride);
-      setPendingRides((prev) => prev.filter((r) => r.id !== ride.id));
-      if (userRef.current?.mode === "client") {
+      const me = userRef.current;
+      const isInvolved = me?.id === ride.driverId || me?.id === ride.clientId;
+      // Only set as active ride for the driver who accepted or the client who requested it
+      if (isInvolved) {
+        setActiveRide(ride);
+      }
+      // All drivers: remove from pending list (ride is taken)
+      if (me?.mode === "driver") {
+        setPendingRides((prev) => prev.filter((r) => r.id !== ride.id));
+      }
+      // Notify only the client whose ride was accepted
+      if (me?.id === ride.clientId) {
         Notifications.scheduleNotificationAsync({
           content: { title: "Motorista encontrado!", body: `${ride.driverName} está a caminho`, sound: true },
           trigger: null,
@@ -315,6 +324,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
 
     socket.on("corrida_finalizada", (ride: Ride) => {
+      const me = userRef.current;
+      // Only update state for the driver or client involved in this ride
+      if (me?.id !== ride.driverId && me?.id !== ride.clientId) return;
       setActiveRide(null);
       setFinishedRideToRate(ride);
       setMyRides((prev) => [ride, ...prev.filter((r) => r.id !== ride.id)]);
@@ -325,7 +337,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
 
     socket.on("corrida_cancelada", (rideId: string) => {
-      setPendingRides((prev) => prev.filter((r) => r.id !== rideId));
+      const me = userRef.current;
+      // All drivers: remove from pending (client cancelled before anyone accepted)
+      if (me?.mode === "driver") {
+        setPendingRides((prev) => prev.filter((r) => r.id !== rideId));
+      }
+      // Only clear active ride for the users directly involved
       setActiveRide((prev) => (prev?.id === rideId ? null : prev));
     });
 
