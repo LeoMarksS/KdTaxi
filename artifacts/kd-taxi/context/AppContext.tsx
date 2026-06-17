@@ -239,6 +239,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const setDriverOnline = useCallback((online: boolean) => {
     setDriverOnlineState(online);
     AsyncStorage.setItem("kd_driver_online", online ? "true" : "false");
+    if (online) {
+      fetch(`${API_BASE}/rides`)
+        .then((r) => (r.ok ? r.json() : []))
+        .then((allRides: Ride[]) => {
+          const waiting = allRides.filter((r) => r.status === "waiting");
+          if (waiting.length === 0) return;
+          setPendingRides((prev) => {
+            const existingIds = new Set(prev.map((r) => r.id));
+            const fresh = waiting.filter((r) => !existingIds.has(r.id));
+            return fresh.length > 0 ? [...fresh, ...prev] : prev;
+          });
+        })
+        .catch(() => {});
+    }
   }, []);
 
   const updateProfile = useCallback(async (name: string, photo?: string) => {

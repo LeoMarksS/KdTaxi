@@ -19,7 +19,7 @@ export function UserAvatar({ name, photo, size = 44, mode }: Props) {
     .toUpperCase()
     .slice(0, 2);
 
-  if (photo) {
+  if (photo && photo !== "[photo]") {
     return (
       <Image
         source={{ uri: photo }}

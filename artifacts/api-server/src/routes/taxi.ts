@@ -99,7 +99,12 @@ function lookupPrice(destination: string): { price: number; isLocal: boolean } |
 }
 
 function safeUser(u: User) {
-  return { ...u, photo: u.photo ? "[photo]" : undefined, password: undefined };
+  return { ...u, password: undefined };
+}
+
+function safeUserList(u: User) {
+  const { password: _pw, photo: _ph, ...rest } = u;
+  return rest;
 }
 
 // POST /login
@@ -156,7 +161,7 @@ router.put("/users/:id", (req: Request, res: Response) => {
 router.get("/users", (_req: Request, res: Response) => {
   res.json(Array.from(users.values())
     .filter((u) => u.mode !== "admin")
-    .map(safeUser));
+    .map(safeUserList));
 });
 
 // GET /users/:id
