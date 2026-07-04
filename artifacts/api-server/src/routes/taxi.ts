@@ -131,12 +131,23 @@ const defaultAdmin: User = {
 };
 users.set(defaultAdmin.id, defaultAdmin);
 
-const authLimiter = rateLimit({
+// Login attempts are limited per phone+IP so one blocked account never locks out other users on the same network
+const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: 15,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: "Muitas tentativas. Tente novamente em alguns minutos." },
+  keyGenerator: (req) => `${req.ip}:${(req.body?.phone ?? "").toString().trim().toLowerCase()}`,
+  message: { error: "Muitas tentativas de login. Tente novamente em alguns minutos." },
+});
+
+// Registration is a rare, one-off action per user, so it gets a much more generous allowance
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Muitas tentativas de cadastro. Tente novamente em alguns minutos." },
 });
 
 async function sendPushNotification(token: string, title: string, body: string, data?: object) {
@@ -176,7 +187,7 @@ function safeUserList(u: User) {
 }
 
 // POST /register – create a new client or driver account
-router.post("/register", authLimiter, (req: Request, res: Response) => {
+router.post("/register", registerLimiter, (req: Request, res: Response) => {
   const { name, phone, password, mode, photo } = req.body as {
     name?: string; phone?: string; password?: string; mode?: string; photo?: string;
   };
@@ -213,7 +224,7 @@ router.post("/register", authLimiter, (req: Request, res: Response) => {
 });
 
 // POST /login – identifies the account (and its role) purely from phone + password
-router.post("/login", authLimiter, (req: Request, res: Response) => {
+router.post("/login", loginLimiter, (req: Request, res: Response) => {
   const { phone, password } = req.body as { phone?: string; password?: string };
 
   if (!phone?.trim() || !password) {
