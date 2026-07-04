@@ -240,11 +240,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     else AsyncStorage.removeItem("kd_token");
   }, []);
 
-  // Authenticated fetch helper: attaches the bearer token to every request
-  const authFetch = useCallback((path: string, init: RequestInit = {}) => {
+  // Authenticated fetch helper: attaches the bearer token to every request.
+  // If the server says the session is no longer valid (e.g. it restarted and
+  // lost its in-memory sessions), clear local auth state so the app returns
+  // to the login screen instead of silently failing every request forever.
+  const authFetch = useCallback(async (path: string, init: RequestInit = {}) => {
     const headers = new Headers(init.headers);
     if (tokenRef.current) headers.set("Authorization", `Bearer ${tokenRef.current}`);
-    return fetch(`${API_BASE}${path}`, { ...init, headers });
+    const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+    if (res.status === 401 && tokenRef.current) {
+      tokenRef.current = null;
+      setTokenState(null);
+      AsyncStorage.removeItem("kd_token");
+      setUserState(null);
+      AsyncStorage.removeItem("kd_user");
+    }
+    return res;
   }, []);
 
   // Persist active ride
