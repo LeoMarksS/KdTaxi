@@ -1,0 +1,1 @@
+- [KD TAXI auth model](kd-taxi-auth.md) — login identifies role from stored account (phone+password), never a client-selected mode; all routes need bearer auth.

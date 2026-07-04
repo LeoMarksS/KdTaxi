@@ -10,34 +10,33 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useApp, API_BASE } from "@/context/AppContext";
+import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { UserAvatar } from "@/components/UserAvatar";
-import type { UserMode } from "@/context/AppContext";
 
-type LoginTab = "user" | "admin";
+type AuthTab = "login" | "register";
+type RegisterMode = "client" | "driver";
 
 export default function LoginScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { setUser } = useApp();
+  const { login, register } = useApp();
 
-  const [tab, setTab] = useState<LoginTab>("user");
+  const [tab, setTab] = useState<AuthTab>("login");
 
-  // User login fields
-  const [name, setName] = useState("");
+  // Shared fields
   const [phone, setPhone] = useState("");
-  const [photo, setPhoto] = useState<string | undefined>();
-  const [selectedMode, setSelectedMode] = useState<UserMode>("client");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Admin login fields
-  const [adminPhone, setAdminPhone] = useState("");
-  const [adminPassword, setAdminPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
+  // Register-only fields
+  const [name, setName] = useState("");
+  const [photo, setPhoto] = useState<string | undefined>();
+  const [registerMode, setRegisterMode] = useState<RegisterMode>("client");
 
-  const userModes: { id: UserMode; label: string; icon: string; desc: string }[] = [
+  const registerModes: { id: RegisterMode; label: string; icon: string; desc: string }[] = [
     { id: "client", label: "Cliente", icon: "account", desc: "Solicitar táxi" },
     { id: "driver", label: "Motorista", icon: "car", desc: "Aceitar corridas" },
   ];
@@ -57,58 +56,32 @@ export default function LoginScreen() {
     }
   };
 
-  const handleUserLogin = async () => {
-    if (!name.trim() || !phone.trim()) { setError("Preencha nome e telefone"); return; }
+  const handleLogin = async () => {
+    if (!phone.trim() || !password) { setError("Preencha telefone e senha"); return; }
     setLoading(true);
     setError("");
-    try {
-      const res = await fetch(`${API_BASE}/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), phone: phone.trim(), mode: selectedMode, photo }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUser({
-          id: data.id, name: data.name, phone: data.phone, mode: selectedMode,
-          photo: photo ?? data.photo, rating: data.rating, rideCount: data.rideCount,
-        });
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        router.replace("/(tabs)");
-      } else {
-        const err = await res.json().catch(() => ({}));
-        setError(err.error ?? "Erro ao entrar. Tente novamente.");
-      }
-    } catch {
-      setError("Sem conexão com o servidor.");
-    } finally {
-      setLoading(false);
+    const result = await login(phone.trim(), password);
+    setLoading(false);
+    if (result.ok) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.replace("/(tabs)");
+    } else {
+      setError(result.error ?? "Credenciais inválidas");
     }
   };
 
-  const handleAdminLogin = async () => {
-    if (!adminPhone.trim() || !adminPassword.trim()) { setError("Preencha usuário e senha"); return; }
+  const handleRegister = async () => {
+    if (!name.trim() || !phone.trim() || !password) { setError("Preencha nome, telefone e senha"); return; }
+    if (password.length < 4) { setError("A senha deve ter ao menos 4 caracteres"); return; }
     setLoading(true);
     setError("");
-    try {
-      const res = await fetch(`${API_BASE}/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: adminPhone.trim(), password: adminPassword, mode: "admin" }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setUser({ id: data.id, name: data.name, phone: data.phone, mode: "admin", photo: data.photo, rating: data.rating, rideCount: data.rideCount });
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        router.replace("/(tabs)");
-      } else {
-        const err = await res.json().catch(() => ({}));
-        setError(err.error ?? "Credenciais inválidas");
-      }
-    } catch {
-      setError("Sem conexão com o servidor.");
-    } finally {
-      setLoading(false);
+    const result = await register(name.trim(), phone.trim(), password, registerMode, photo);
+    setLoading(false);
+    if (result.ok) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.replace("/(tabs)");
+    } else {
+      setError(result.error ?? "Erro ao criar conta.");
     }
   };
 
@@ -173,21 +146,10 @@ export default function LoginScreen() {
       fontSize: 13, color: colors.mutedForeground, marginBottom: 10, fontFamily: "Inter_500Medium",
       letterSpacing: 0.5, textTransform: "uppercase",
     },
-    adminHint: {
+    loginHint: {
       fontSize: 13, color: colors.mutedForeground, fontFamily: "Inter_400Regular",
       textAlign: "center", marginBottom: 20, lineHeight: 20,
     },
-    adminCard: {
-      backgroundColor: colors.card, borderRadius: colors.radius,
-      padding: 18, marginBottom: 20, borderWidth: 1, borderColor: colors.border,
-      flexDirection: "row", alignItems: "center", gap: 14,
-    },
-    adminCardIcon: {
-      width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary + "33",
-      alignItems: "center", justifyContent: "center",
-    },
-    adminCardTitle: { fontSize: 15, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold" },
-    adminCardSub: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2 },
   });
 
   return (
@@ -205,23 +167,65 @@ export default function LoginScreen() {
 
           <View style={s.tabRow}>
             <TouchableOpacity
-              style={[s.tabBtn, { backgroundColor: tab === "user" ? colors.primary : "transparent" }]}
-              onPress={() => { setTab("user"); setError(""); Haptics.selectionAsync(); }}
+              style={[s.tabBtn, { backgroundColor: tab === "login" ? colors.primary : "transparent" }]}
+              onPress={() => { setTab("login"); setError(""); Haptics.selectionAsync(); }}
             >
-              <MaterialCommunityIcons name="account" size={16} color={tab === "user" ? "#000" : colors.mutedForeground} />
-              <Text style={[s.tabBtnText, { color: tab === "user" ? "#000" : colors.mutedForeground }]}>Usuário</Text>
+              <MaterialCommunityIcons name="login" size={16} color={tab === "login" ? "#000" : colors.mutedForeground} />
+              <Text style={[s.tabBtnText, { color: tab === "login" ? "#000" : colors.mutedForeground }]}>Entrar</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[s.tabBtn, { backgroundColor: tab === "admin" ? colors.card : "transparent", borderWidth: tab === "admin" ? 1 : 0, borderColor: colors.border }]}
-              onPress={() => { setTab("admin"); setError(""); Haptics.selectionAsync(); }}
+              style={[s.tabBtn, { backgroundColor: tab === "register" ? colors.card : "transparent", borderWidth: tab === "register" ? 1 : 0, borderColor: colors.border }]}
+              onPress={() => { setTab("register"); setError(""); Haptics.selectionAsync(); }}
             >
-              <MaterialCommunityIcons name="shield-check" size={16} color={tab === "admin" ? colors.foreground : colors.mutedForeground} />
-              <Text style={[s.tabBtnText, { color: tab === "admin" ? colors.foreground : colors.mutedForeground }]}>Admin</Text>
+              <MaterialCommunityIcons name="account-plus" size={16} color={tab === "register" ? colors.foreground : colors.mutedForeground} />
+              <Text style={[s.tabBtnText, { color: tab === "register" ? colors.foreground : colors.mutedForeground }]}>Criar conta</Text>
             </TouchableOpacity>
           </View>
 
           <View style={s.form}>
-            {tab === "user" ? (
+            {tab === "login" ? (
+              <>
+                <Text style={s.loginHint}>
+                  Entre com seu telefone e senha. O sistema identifica automaticamente se você é cliente, motorista ou administrador.
+                </Text>
+
+                <Text style={s.label}>Telefone</Text>
+                <TextInput
+                  style={s.input} value={phone} onChangeText={setPhone}
+                  placeholder="(00) 00000-0000" placeholderTextColor={colors.mutedForeground}
+                  keyboardType="phone-pad" autoCapitalize="none" autoCorrect={false}
+                />
+
+                <Text style={s.label}>Senha</Text>
+                <View style={s.passwordRow}>
+                  <TextInput
+                    style={s.passwordInput} value={password} onChangeText={setPassword}
+                    placeholder="Sua senha" placeholderTextColor={colors.mutedForeground}
+                    secureTextEntry={!showPassword} autoCapitalize="none" autoCorrect={false}
+                  />
+                  <TouchableOpacity style={s.eyeBtn} onPress={() => setShowPassword((v) => !v)}>
+                    <Feather name={showPassword ? "eye-off" : "eye"} size={20} color={colors.mutedForeground} />
+                  </TouchableOpacity>
+                </View>
+
+                {!!error && <Text style={s.error}>{error}</Text>}
+
+                <TouchableOpacity
+                  style={[s.btn, { backgroundColor: colors.primary }]}
+                  onPress={handleLogin}
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <ActivityIndicator color="#000" />
+                  ) : (
+                    <>
+                      <Feather name="arrow-right" size={20} color="#000" />
+                      <Text style={[s.btnText, { color: "#000" }]}>Entrar</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </>
+            ) : (
               <>
                 <View style={s.photoRow}>
                   <TouchableOpacity style={s.photoBtn} onPress={pickPhoto}>
@@ -245,28 +249,40 @@ export default function LoginScreen() {
                 <TextInput
                   style={s.input} value={phone} onChangeText={setPhone}
                   placeholder="(00) 00000-0000" placeholderTextColor={colors.mutedForeground}
-                  keyboardType="phone-pad"
+                  keyboardType="phone-pad" autoCapitalize="none" autoCorrect={false}
                 />
 
-                <Text style={s.sectionLabel}>Entrar como</Text>
+                <Text style={s.label}>Senha</Text>
+                <View style={s.passwordRow}>
+                  <TextInput
+                    style={s.passwordInput} value={password} onChangeText={setPassword}
+                    placeholder="Crie uma senha (mín. 4 caracteres)" placeholderTextColor={colors.mutedForeground}
+                    secureTextEntry={!showPassword} autoCapitalize="none" autoCorrect={false}
+                  />
+                  <TouchableOpacity style={s.eyeBtn} onPress={() => setShowPassword((v) => !v)}>
+                    <Feather name={showPassword ? "eye-off" : "eye"} size={20} color={colors.mutedForeground} />
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={s.sectionLabel}>Criar conta como</Text>
                 <View style={s.modesRow}>
-                  {userModes.map((m) => (
+                  {registerModes.map((m) => (
                     <TouchableOpacity
                       key={m.id}
                       style={[s.modeCard, {
-                        backgroundColor: selectedMode === m.id ? colors.primary : colors.card,
-                        borderColor: selectedMode === m.id ? colors.primary : colors.border,
+                        backgroundColor: registerMode === m.id ? colors.primary : colors.card,
+                        borderColor: registerMode === m.id ? colors.primary : colors.border,
                       }]}
-                      onPress={() => { setSelectedMode(m.id); Haptics.selectionAsync(); }}
+                      onPress={() => { setRegisterMode(m.id); Haptics.selectionAsync(); }}
                     >
                       <MaterialCommunityIcons
                         name={m.icon as any} size={30}
-                        color={selectedMode === m.id ? "#000" : colors.mutedForeground}
+                        color={registerMode === m.id ? "#000" : colors.mutedForeground}
                       />
-                      <Text style={[s.modeLabel, { color: selectedMode === m.id ? "#000" : colors.foreground }]}>
+                      <Text style={[s.modeLabel, { color: registerMode === m.id ? "#000" : colors.foreground }]}>
                         {m.label}
                       </Text>
-                      <Text style={[s.modeDesc, { color: selectedMode === m.id ? "#00000099" : colors.mutedForeground }]}>
+                      <Text style={[s.modeDesc, { color: registerMode === m.id ? "#00000099" : colors.mutedForeground }]}>
                         {m.desc}
                       </Text>
                     </TouchableOpacity>
@@ -277,63 +293,15 @@ export default function LoginScreen() {
 
                 <TouchableOpacity
                   style={[s.btn, { backgroundColor: colors.primary }]}
-                  onPress={handleUserLogin}
+                  onPress={handleRegister}
                   disabled={loading}
                 >
                   {loading ? (
                     <ActivityIndicator color="#000" />
                   ) : (
                     <>
-                      <Feather name="arrow-right" size={20} color="#000" />
-                      <Text style={[s.btnText, { color: "#000" }]}>Entrar</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <View style={s.adminCard}>
-                  <View style={s.adminCardIcon}>
-                    <MaterialCommunityIcons name="shield-check" size={24} color={colors.primary} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.adminCardTitle}>Área Restrita</Text>
-                    <Text style={s.adminCardSub}>Acesso exclusivo para administradores cadastrados</Text>
-                  </View>
-                </View>
-
-                <Text style={s.label}>Usuário Admin</Text>
-                <TextInput
-                  style={s.input} value={adminPhone} onChangeText={setAdminPhone}
-                  placeholder="Usuário (ex: admin)" placeholderTextColor={colors.mutedForeground}
-                  autoCapitalize="none" autoCorrect={false}
-                />
-
-                <Text style={s.label}>Senha</Text>
-                <View style={s.passwordRow}>
-                  <TextInput
-                    style={s.passwordInput} value={adminPassword} onChangeText={setAdminPassword}
-                    placeholder="Senha de acesso" placeholderTextColor={colors.mutedForeground}
-                    secureTextEntry={!showPassword} autoCapitalize="none" autoCorrect={false}
-                  />
-                  <TouchableOpacity style={s.eyeBtn} onPress={() => setShowPassword((v) => !v)}>
-                    <Feather name={showPassword ? "eye-off" : "eye"} size={20} color={colors.mutedForeground} />
-                  </TouchableOpacity>
-                </View>
-
-                {!!error && <Text style={s.error}>{error}</Text>}
-
-                <TouchableOpacity
-                  style={[s.btn, { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }]}
-                  onPress={handleAdminLogin}
-                  disabled={loading}
-                >
-                  {loading ? (
-                    <ActivityIndicator color={colors.foreground} />
-                  ) : (
-                    <>
-                      <MaterialCommunityIcons name="shield-lock" size={20} color={colors.foreground} />
-                      <Text style={[s.btnText, { color: colors.foreground }]}>Acessar Painel</Text>
+                      <Feather name="user-plus" size={20} color="#000" />
+                      <Text style={[s.btnText, { color: "#000" }]}>Criar conta</Text>
                     </>
                   )}
                 </TouchableOpacity>

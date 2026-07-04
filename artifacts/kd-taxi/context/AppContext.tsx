@@ -123,6 +123,10 @@ interface AppContextValue {
   adminClearRides: () => Promise<boolean>;
   // Chat open state
   setChatOpen: (open: boolean) => void;
+  // Auth
+  token: string | null;
+  login: (phone: string, password: string) => Promise<{ ok: boolean; error?: string }>;
+  register: (name: string, phone: string, password: string, mode: "client" | "driver", photo?: string) => Promise<{ ok: boolean; error?: string }>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -189,6 +193,8 @@ async function playRideRequestSound() {
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [user, setUserState] = useState<User | null>(null);
+  const [token, setTokenState] = useState<string | null>(null);
+  const tokenRef = useRef<string | null>(null);
   const [isDriverOnline, setDriverOnlineState] = useState(false);
   const [activeRide, setActiveRide] = useState<Ride | null>(null);
   const [pendingRides, setPendingRides] = useState<Ride[]>([]);
@@ -213,12 +219,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     AsyncStorage.getItem("kd_user").then((data) => {
       if (data) setUserState(JSON.parse(data) as User);
     });
+    AsyncStorage.getItem("kd_token").then((data) => {
+      if (data) {
+        tokenRef.current = data;
+        setTokenState(data);
+      }
+    });
     AsyncStorage.getItem("kd_driver_online").then((data) => {
       if (data === "true") setDriverOnlineState(true);
     });
     AsyncStorage.getItem("kd_active_ride").then((data) => {
       if (data) setActiveRide(JSON.parse(data) as Ride);
     });
+  }, []);
+
+  const setToken = useCallback((t: string | null) => {
+    tokenRef.current = t;
+    setTokenState(t);
+    if (t) AsyncStorage.setItem("kd_token", t);
+    else AsyncStorage.removeItem("kd_token");
+  }, []);
+
+  // Authenticated fetch helper: attaches the bearer token to every request
+  const authFetch = useCallback((path: string, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers);
+    if (tokenRef.current) headers.set("Authorization", `Bearer ${tokenRef.current}`);
+    return fetch(`${API_BASE}${path}`, { ...init, headers });
   }, []);
 
   // Persist active ride
@@ -240,7 +266,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setDriverOnlineState(online);
     AsyncStorage.setItem("kd_driver_online", online ? "true" : "false");
     if (online) {
-      fetch(`${API_BASE}/rides`)
+      authFetch(`/rides`)
         .then((r) => (r.ok ? r.json() : []))
         .then((allRides: Ride[]) => {
           const waiting = allRides.filter((r) => r.status === "waiting");
@@ -260,24 +286,60 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const updated: User = { ...user, name, photo: photo ?? user.photo };
     setUser(updated);
     try {
-      await fetch(`${API_BASE}/users/${user.id}`, {
+      await authFetch(`/users/${user.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, photo: photo ?? user.photo }),
       });
     } catch {}
-  }, [user, setUser]);
+  }, [user, setUser, authFetch]);
+
+  const login = useCallback(async (phone: string, password: string): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const res = await fetch(`${API_BASE}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: data.error ?? "Credenciais inválidas" };
+      setToken(data.token);
+      setUser(data.user as User);
+      return { ok: true };
+    } catch {
+      return { ok: false, error: "Sem conexão com o servidor." };
+    }
+  }, [setUser, setToken]);
+
+  const register = useCallback(async (
+    name: string, phone: string, password: string, mode: "client" | "driver", photo?: string
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const res = await fetch(`${API_BASE}/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, phone, password, mode, photo }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: data.error ?? "Erro ao criar conta." };
+      setToken(data.token);
+      setUser(data.user as User);
+      return { ok: true };
+    } catch {
+      return { ok: false, error: "Sem conexão com o servidor." };
+    }
+  }, [setUser, setToken]);
 
   // Register push notifications when user logs in
   useEffect(() => {
     if (!user) return;
-    registerForPushNotifications().then(async (token) => {
-      if (token && user.id) {
+    registerForPushNotifications().then(async (pushToken) => {
+      if (pushToken && user.id) {
         try {
-          await fetch(`${API_BASE}/users/${user.id}`, {
+          await authFetch(`/users/${user.id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pushToken: token }),
+            body: JSON.stringify({ pushToken }),
           });
         } catch {}
       }
@@ -382,7 +444,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const requestRide = useCallback(async (origin: string, destination: string, payment: "pix" | "dinheiro"): Promise<Ride | null> => {
     if (!user) return null;
-    const res = await fetch(`${API_BASE}/request-ride`, {
+    const res = await authFetch(`/request-ride`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -394,11 +456,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const ride: Ride = await res.json();
     setActiveRide(ride);
     return ride;
-  }, [user]);
+  }, [user, authFetch]);
 
   const acceptRide = useCallback(async (rideId: string) => {
     if (!user) return;
-    const res = await fetch(`${API_BASE}/accept-ride`, {
+    const res = await authFetch(`/accept-ride`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rideId, driverId: user.id, driverName: user.name, driverPhoto: user.photo }),
@@ -408,14 +470,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setActiveRide(ride);
       setPendingRides((prev) => prev.filter((r) => r.id !== rideId));
     }
-  }, [user]);
+  }, [user, authFetch]);
 
   const declineRide = useCallback((rideId: string) => {
     setPendingRides((prev) => prev.filter((r) => r.id !== rideId));
   }, []);
 
   const finishRide = useCallback(async (rideId: string) => {
-    const res = await fetch(`${API_BASE}/finish-ride`, {
+    const res = await authFetch(`/finish-ride`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rideId }),
@@ -427,27 +489,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setMyRides((prev) => [ride, ...prev.filter((r) => r.id !== ride.id)]);
       setChatMessages([]);
     }
-  }, []);
+  }, [authFetch]);
 
   const cancelRide = useCallback(async (rideId: string) => {
-    await fetch(`${API_BASE}/cancel-ride`, {
+    await authFetch(`/cancel-ride`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rideId }),
     });
     setActiveRide(null);
     setChatMessages([]);
-  }, []);
+  }, [authFetch]);
 
   const rateRide = useCallback(async (rideId: string, rating: number) => {
     if (!user) return;
-    await fetch(`${API_BASE}/rides/${rideId}/rate`, {
+    await authFetch(`/rides/${rideId}/rate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ raterMode: user.mode, rating }),
     });
     setFinishedRideToRate(null);
-  }, [user]);
+  }, [user, authFetch]);
 
   const sendChatMessage = useCallback((text: string) => {
     if (!user || !activeRide || !socketRef.current) return;
@@ -469,7 +531,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    if (tokenRef.current) {
+      authFetch(`/logout`, { method: "POST" }).catch(() => {});
+    }
     setUser(null);
+    setToken(null);
     setActiveRide(null);
     setPendingRides([]);
     setChatMessages([]);
@@ -479,67 +545,67 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setDriverOnlineState(false);
     setAdminStats(null);
     AsyncStorage.multiRemove(["kd_driver_online", "kd_active_ride"]);
-  }, [setUser]);
+  }, [setUser, setToken, authFetch]);
 
   const refreshAdminData = useCallback(async () => {
     const [ridesRes, usersRes] = await Promise.all([
-      fetch(`${API_BASE}/rides`),
-      fetch(`${API_BASE}/users`),
+      authFetch(`/rides`),
+      authFetch(`/users`),
     ]);
     if (ridesRes.ok) setAllRides(await ridesRes.json());
     if (usersRes.ok) setAllUsers(await usersRes.json());
-  }, []);
+  }, [authFetch]);
 
   const refreshAdminStats = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/admin/stats`);
+      const res = await authFetch(`/admin/stats`);
       if (res.ok) setAdminStats(await res.json());
     } catch {}
-  }, []);
+  }, [authFetch]);
 
   const fetchMyRides = useCallback(async () => {
     if (!user) return;
     try {
-      const res = await fetch(`${API_BASE}/users/${user.id}/rides`);
+      const res = await authFetch(`/users/${user.id}/rides`);
       if (res.ok) setMyRides(await res.json());
     } catch {}
-  }, [user]);
+  }, [user, authFetch]);
 
   const refreshPricing = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/pricing`);
+    const res = await authFetch(`/pricing`);
     if (res.ok) setPricing(await res.json());
-  }, []);
+  }, [authFetch]);
 
   const setPricingRule = useCallback(async (destination: string, price: number, isLocal?: boolean) => {
-    await fetch(`${API_BASE}/pricing`, {
+    await authFetch(`/pricing`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ destination, price, isLocal }),
     });
     await refreshPricing();
-  }, [refreshPricing]);
+  }, [refreshPricing, authFetch]);
 
   const deletePricingRule = useCallback(async (id: string) => {
-    await fetch(`${API_BASE}/pricing/${id}`, { method: "DELETE" });
+    await authFetch(`/pricing/${id}`, { method: "DELETE" });
     await refreshPricing();
-  }, [refreshPricing]);
+  }, [refreshPricing, authFetch]);
 
   const lookupPrice = useCallback(async (destination: string): Promise<{ price: number; isLocal: boolean } | null> => {
     try {
-      const res = await fetch(`${API_BASE}/pricing/lookup?destination=${encodeURIComponent(destination)}`);
+      const res = await authFetch(`/pricing/lookup?destination=${encodeURIComponent(destination)}`);
       if (res.ok) {
         const d = await res.json();
         if (d.price !== null && d.price !== undefined) return { price: d.price, isLocal: d.isLocal ?? false };
       }
     } catch {}
     return null;
-  }, []);
+  }, [authFetch]);
 
   const adminUpdateUser = useCallback(async (id: string, data: {
     name?: string; phone?: string; mode?: string; active?: boolean; password?: string;
   }): Promise<boolean> => {
     try {
-      const res = await fetch(`${API_BASE}/admin/users/${id}`, {
+      const res = await authFetch(`/admin/users/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
@@ -551,29 +617,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     } catch {}
     return false;
-  }, []);
+  }, [authFetch]);
 
   const adminDeleteUser = useCallback(async (id: string): Promise<boolean> => {
     try {
-      const res = await fetch(`${API_BASE}/admin/users/${id}`, { method: "DELETE" });
+      const res = await authFetch(`/admin/users/${id}`, { method: "DELETE" });
       if (res.ok) {
         setAllUsers((prev) => prev.filter((u) => u.id !== id));
         return true;
       }
     } catch {}
     return false;
-  }, []);
+  }, [authFetch]);
 
   const adminClearRides = useCallback(async (): Promise<boolean> => {
     try {
-      const res = await fetch(`${API_BASE}/admin/rides`, { method: "DELETE" });
+      const res = await authFetch(`/admin/rides`, { method: "DELETE" });
       if (res.ok) {
         setAllRides([]);
         return true;
       }
     } catch {}
     return false;
-  }, []);
+  }, [authFetch]);
 
   const setChatOpen = useCallback((open: boolean) => {
     isChatOpenRef.current = open;
@@ -596,6 +662,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       finishedRideToRate, clearFinishedRideToRate: () => setFinishedRideToRate(null),
       adminUpdateUser, adminDeleteUser, adminClearRides,
       setChatOpen,
+      token, login, register,
     }}>
       {children}
     </AppContext.Provider>
