@@ -49,9 +49,12 @@ export default function LoginScreen() {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.4,
+      base64: true,
     });
-    if (!result.canceled && result.assets[0]) {
-      setPhoto(result.assets[0].uri);
+    const asset = !result.canceled ? result.assets[0] : undefined;
+    if (asset?.base64) {
+      const mime = asset.mimeType ?? "image/jpeg";
+      setPhoto(`data:${mime};base64,${asset.base64}`);
       Haptics.selectionAsync();
     }
   };

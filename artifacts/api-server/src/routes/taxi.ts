@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { Router } from "express";
 import type { NextFunction, Request, Response } from "express";
 import bcrypt from "bcryptjs";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 
 const router = Router();
 
@@ -137,7 +137,7 @@ const loginLimiter = rateLimit({
   max: 15,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => `${req.ip}:${(req.body?.phone ?? "").toString().trim().toLowerCase()}`,
+  keyGenerator: (req) => `${ipKeyGenerator(req.ip ?? "")}:${(req.body?.phone ?? "").toString().trim().toLowerCase()}`,
   message: { error: "Muitas tentativas de login. Tente novamente em alguns minutos." },
 });
 
