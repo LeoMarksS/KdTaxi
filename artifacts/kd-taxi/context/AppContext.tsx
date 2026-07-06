@@ -208,10 +208,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [finishedRideToRate, setFinishedRideToRate] = useState<Ride | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const userRef = useRef<User | null>(null);
+  const activeRideRef = useRef<Ride | null>(null);
   const isDriverOnlineRef = useRef(false);
   const isChatOpenRef = useRef(false);
 
   useEffect(() => { userRef.current = user; }, [user]);
+  useEffect(() => { activeRideRef.current = activeRide; }, [activeRide]);
   useEffect(() => { isDriverOnlineRef.current = isDriverOnline; }, [isDriverOnline]);
 
   // Load persisted state
@@ -359,14 +361,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Socket connection
   useEffect(() => {
-    if (!user) return;
+    if (!user || !token) return;
 
     const socket = io(`https://${process.env.EXPO_PUBLIC_DOMAIN}`, {
       path: "/api/socket.io",
       transports: ["polling", "websocket"],
-      query: { userId: user.id, mode: user.mode },
+      // Identity is verified server-side from this token, never trusted
+      // from client-supplied fields, and doubles as socket auth.
+      auth: { token },
     });
     socketRef.current = socket;
+
+    // Reconnects happen constantly on mobile (backgrounding, network
+    // switches, weak signal). Any event that fired while disconnected is
+    // otherwise lost forever, so reconcile state from the server whenever a
+    // connection (re)establishes rather than relying purely on push events.
+    const reconcile = async () => {
+      const me = userRef.current;
+      if (!me) return;
+      try {
+        if (me.mode === "driver") {
+          const res = await authFetch(`/rides`);
+          if (res.ok) {
+            const all: Ride[] = await res.json();
+            setPendingRides(all.filter((r) => r.status === "waiting"));
+          }
+        }
+        const current = activeRideRef.current;
+        if (current) {
+          const res = await authFetch(`/rides`);
+          if (res.ok) {
+            const all: Ride[] = await res.json();
+            const fresh = all.find((r) => r.id === current.id);
+            if (fresh) {
+              if (fresh.status === "finished" || fresh.status === "cancelled") {
+                setActiveRide(null);
+              } else {
+                setActiveRide(fresh);
+              }
+            }
+          }
+        }
+      } catch {}
+    };
+
+    socket.on("connect", reconcile);
 
     socket.on("nova_corrida", (ride: Ride) => {
       if (userRef.current?.mode === "driver") {
@@ -434,7 +473,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
 
     socket.on("mensagem_chat", (msg: ChatMessage) => {
-      setChatMessages((prev) => [...prev, msg]);
+      setChatMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
       if (msg.senderId !== userRef.current?.id) {
         // Only increment badge and notify when chat screen is not open
         if (!isChatOpenRef.current) {
@@ -448,10 +487,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => {
+      socket.off("connect", reconcile);
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [user]);
+  }, [user, token]);
+
+  // Chat history is now persisted server-side, so whenever the active ride
+  // changes (e.g. after a reconnect reconciliation or app relaunch) fetch
+  // the full history instead of relying only on messages that arrived while
+  // the socket happened to be connected.
+  useEffect(() => {
+    if (!activeRide) {
+      setChatMessages([]);
+      return;
+    }
+    authFetch(`/rides/${activeRide.id}/chat`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((history: ChatMessage[]) => {
+        setChatMessages((prev) => {
+          const merged = [...history];
+          for (const m of prev) {
+            if (!merged.some((h) => h.id === m.id)) merged.push(m);
+          }
+          return merged;
+        });
+      })
+      .catch(() => {});
+  }, [activeRide?.id]);
 
   const requestRide = useCallback(async (origin: string, destination: string, payment: "pix" | "dinheiro"): Promise<Ride | null> => {
     if (!user) return null;
@@ -524,17 +587,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const sendChatMessage = useCallback((text: string) => {
     if (!user || !activeRide || !socketRef.current) return;
-    const msg: ChatMessage = {
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-      rideId: activeRide.id,
-      senderId: user.id,
-      senderName: user.name,
-      senderPhoto: user.photo,
-      text,
-      timestamp: new Date().toISOString(),
-    };
-    socketRef.current.emit("mensagem_chat", msg);
-    setChatMessages((prev) => [...prev, msg]);
+    // Identity, id, and timestamp are now assigned authoritatively by the
+    // server (see index.ts), which then echoes the message back to every
+    // participant's room including our own — so we don't optimistically
+    // append here, avoiding duplicate entries once the echo arrives.
+    socketRef.current.emit("mensagem_chat", { rideId: activeRide.id, text });
   }, [user, activeRide]);
 
   const markChatRead = useCallback(() => {

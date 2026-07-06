@@ -58,10 +58,23 @@ interface Session {
   expiresAt: number;
 }
 
+export interface ChatMessage {
+  id: string;
+  rideId: string;
+  senderId: string;
+  senderName: string;
+  senderPhoto?: string;
+  text: string;
+  timestamp: string;
+}
+
 const users: Map<string, User> = new Map();
 const rides: Map<string, Ride> = new Map();
 const pricing: Map<string, PriceRule> = new Map();
 const sessions: Map<string, Session> = new Map();
+// Chat history persisted server-side (keyed by rideId) so messages survive
+// brief socket disconnects/reconnects and reloads instead of being lost in transit.
+const chatByRide: Map<string, ChatMessage[]> = new Map();
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -75,10 +88,8 @@ function createSession(userId: string): string {
   return token;
 }
 
-function getSessionUser(req: Request): User | undefined {
-  const auth = req.headers.authorization;
-  if (!auth?.startsWith("Bearer ")) return undefined;
-  const token = auth.slice(7);
+function getUserByToken(token: string | undefined): User | undefined {
+  if (!token) return undefined;
   const session = sessions.get(token);
   if (!session) return undefined;
   if (session.expiresAt < Date.now()) {
@@ -86,6 +97,39 @@ function getSessionUser(req: Request): User | undefined {
     return undefined;
   }
   return users.get(session.userId);
+}
+
+function getSessionUser(req: Request): User | undefined {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) return undefined;
+  return getUserByToken(auth.slice(7));
+}
+
+// Exposed for Socket.io connection/message authentication in index.ts, so
+// real-time events trust the same session tokens as the REST API instead of
+// blindly trusting client-supplied identity fields.
+export function authenticateSocketToken(token: string | undefined) {
+  const user = getUserByToken(token);
+  if (!user) return undefined;
+  return safeUser(user);
+}
+
+export function isRideParticipant(rideId: string, userId: string): boolean {
+  const ride = rides.get(rideId);
+  if (!ride) return false;
+  return ride.clientId === userId || ride.driverId === userId;
+}
+
+export function recordChatMessage(msg: ChatMessage) {
+  const list = chatByRide.get(msg.rideId) ?? [];
+  list.push(msg);
+  chatByRide.set(msg.rideId, list);
+}
+
+export function getRideParticipants(rideId: string): { clientId?: string; driverId?: string } {
+  const ride = rides.get(rideId);
+  if (!ride) return {};
+  return { clientId: ride.clientId, driverId: ride.driverId };
 }
 
 declare global {
@@ -474,6 +518,20 @@ router.post("/cancel-ride", requireAuth, (req: Request, res: Response) => {
   const io = req.app.get("io");
   if (io) io.emit("corrida_cancelada", ride.id);
   res.json(ride);
+});
+
+// GET /rides/:id/chat – participants (or admin) only, used to recover chat
+// history after a reconnect or app reload since messages are no longer
+// solely reliant on both sockets being connected at the exact same moment.
+router.get("/rides/:id/chat", requireAuth, (req: Request, res: Response) => {
+  const rideId = req.params.id as string;
+  const ride = rides.get(rideId);
+  if (!ride) { res.status(404).json({ error: "Ride not found" }); return; }
+  if (req.authUser!.id !== ride.clientId && req.authUser!.id !== ride.driverId && req.authUser!.mode !== "admin") {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+  res.json(chatByRide.get(rideId) ?? []);
 });
 
 // POST /rides/:id/rate
