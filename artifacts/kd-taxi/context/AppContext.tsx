@@ -72,6 +72,7 @@ export interface AdminStats {
   totalUsers: number;
   totalClients: number;
   totalDrivers: number;
+  onlineDrivers: number;
   totalRides: number;
   finishedRides: number;
   cancelledRides: number;

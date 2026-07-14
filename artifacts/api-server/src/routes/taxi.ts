@@ -226,7 +226,7 @@ function safeUser(u: User) {
 }
 
 function safeUserList(u: User) {
-  const { passwordHash: _ph, photo: _photo, ...rest } = u;
+  const { passwordHash: _ph, ...rest } = u;
   return rest;
 }
 
@@ -382,6 +382,7 @@ router.get("/admin/stats", requireAdmin, (_req: Request, res: Response) => {
     totalUsers: allUserList.filter((u) => u.mode !== "admin").length,
     totalClients: allUserList.filter((u) => u.mode === "client").length,
     totalDrivers: allUserList.filter((u) => u.mode === "driver").length,
+    onlineDrivers: allUserList.filter((u) => u.mode === "driver" && u.active).length,
     totalRides: allRideList.length,
     finishedRides: finishedRides.length,
     cancelledRides: allRideList.filter((r) => r.status === "cancelled").length,

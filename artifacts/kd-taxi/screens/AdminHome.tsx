@@ -87,7 +87,7 @@ function EditUserModal({ user, onSave, onDelete, onClose }: {
     <View style={s.overlay}>
       <View style={s.card}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 20 }}>
-          <UserAvatar name={user.name} size={44} mode={user.mode as any} />
+          <UserAvatar name={user.name} photo={user.photo} size={44} mode={user.mode as any} />
           <View style={{ flex: 1 }}>
             <Text style={s.title}>{user.mode === "driver" ? "Editar Motorista" : "Editar Passageiro"}</Text>
           </View>
@@ -375,7 +375,7 @@ export default function AdminHome() {
 
   const renderUserCard = (item: User) => (
     <View style={s.userCard} key={item.id}>
-      <UserAvatar name={item.name} size={46} mode={item.mode as any} />
+      <UserAvatar name={item.name} photo={item.photo} size={46} mode={item.mode as any} />
       <View style={s.userInfo}>
         <Text style={s.userName}>{item.name}</Text>
         <Text style={s.userPhone}>{item.phone}</Text>
@@ -472,6 +472,15 @@ export default function AdminHome() {
                 value={(adminStats?.avgRating ?? 0) > 0 ? `${(adminStats!.avgRating).toFixed(1)}★` : "—"}
                 color={colors.primary}
               />
+            </View>
+            <View style={s.statRow}>
+              <StatCard
+                label="Online agora"
+                value={adminStats?.onlineDrivers ?? 0}
+                sub={adminStats?.onlineDrivers ? "🟢 ativos" : undefined}
+                color={adminStats?.onlineDrivers ? "#4CAF50" : colors.mutedForeground}
+              />
+              <View style={{ flex: 3 }} />
             </View>
           </View>
 
