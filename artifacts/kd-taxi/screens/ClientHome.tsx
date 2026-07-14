@@ -525,7 +525,7 @@ export default function ClientHome() {
               <View style={s.actionRow}>
                 {(activeRide.status === "accepted" || activeRide.status === "in_progress") && (
                   <View style={s.chatBtnWrap}>
-                    <TouchableOpacity style={s.chatBtn} onPress={() => router.push("/chat")}>
+                    <TouchableOpacity style={s.chatBtn} onPress={() => router.push(`/chat?rideId=${activeRide.id}` as any)}>
                       <Feather name="message-circle" size={18} color="#000" />
                       <Text style={s.chatBtnText}>Chat</Text>
                     </TouchableOpacity>

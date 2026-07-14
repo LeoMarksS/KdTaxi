@@ -1,8 +1,8 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useFocusEffect } from "expo-router";
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   FlatList,
   Platform,
@@ -86,27 +86,51 @@ function Message({ msg, isMe }: { msg: ChatMessage; isMe: boolean }) {
 export default function ChatScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, chatMessages, sendChatMessage, activeRide, markChatRead, setChatOpen } = useApp();
+  const { rideId } = useLocalSearchParams<{ rideId: string }>();
+  const {
+    user, chatMessagesByRide, sendChatMessage,
+    activeRide, activeRides, markChatRead, setChatOpen, fetchChatHistory,
+  } = useApp();
   const [text, setText] = useState("");
   const flatRef = useRef<FlatList>(null);
 
-  // Mark all messages as read and flag chat as open while this screen is focused
+  // Find the ride this chat belongs to — client uses activeRide, driver
+  // finds the matching entry in their activeRides list.
+  const ride = user?.mode === "driver"
+    ? activeRides.find((r) => r.id === rideId)
+    : (activeRide?.id === rideId ? activeRide : undefined);
+
+  const messages = (rideId ? chatMessagesByRide[rideId] : undefined) ?? [];
+
+  // Fetch server-side history and mark as read whenever this chat is focused
   useFocusEffect(
     useCallback(() => {
-      setChatOpen(true);
-      markChatRead();
+      if (!rideId) return;
+      setChatOpen(true, rideId);
+      markChatRead(rideId);
+      fetchChatHistory(rideId);
       return () => {
-        setChatOpen(false);
+        setChatOpen(false, rideId);
       };
-    }, [setChatOpen, markChatRead])
+    }, [rideId, setChatOpen, markChatRead, fetchChatHistory])
   );
 
+  // Fetch history also when new messages arrive (keeps history fresh in case
+  // the component was already mounted when a message came in while offline)
+  useEffect(() => {
+    if (rideId) fetchChatHistory(rideId);
+  }, [rideId]);
+
   const handleSend = () => {
-    if (!text.trim()) return;
+    if (!text.trim() || !rideId) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    sendChatMessage(text.trim());
+    sendChatMessage(text.trim(), rideId);
     setText("");
   };
+
+  const otherPerson = user?.mode === "client" ? ride?.driverName : ride?.clientName;
+  const otherPhoto = user?.mode === "client" ? ride?.driverPhoto : ride?.clientPhoto;
+  const otherMode = user?.mode === "client" ? "driver" : "client";
 
   const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
@@ -162,10 +186,6 @@ export default function ChatScreen() {
     },
   });
 
-  const otherPerson = user?.mode === "client" ? activeRide?.driverName : activeRide?.clientName;
-  const otherPhoto = user?.mode === "client" ? activeRide?.driverPhoto : activeRide?.clientPhoto;
-  const otherMode = user?.mode === "client" ? "driver" : "client";
-
   return (
     <View style={s.container}>
       <View style={s.header}>
@@ -180,7 +200,7 @@ export default function ChatScreen() {
         <View style={s.headerInfo}>
           <Text style={s.headerTitle}>{otherPerson ?? "Chat"}</Text>
           <Text style={s.headerSub}>
-            {activeRide?.origin} → {activeRide?.destination}
+            {ride?.origin} → {ride?.destination}
           </Text>
         </View>
       </View>
@@ -194,7 +214,7 @@ export default function ChatScreen() {
           ref={flatRef}
           inverted
           style={s.messages}
-          data={[...chatMessages].reverse()}
+          data={[...messages].reverse()}
           keyExtractor={(m) => m.id}
           contentContainerStyle={{ paddingTop: 12, paddingBottom: 8 }}
           renderItem={({ item }) => (

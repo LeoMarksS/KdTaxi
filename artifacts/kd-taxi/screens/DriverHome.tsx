@@ -148,13 +148,14 @@ export default function DriverHome() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const {
-    user, isDriverOnline, setDriverOnline, activeRide, pendingRides,
-    acceptRide, declineRide, finishRide, logout, unreadChatCount,
+    user, isDriverOnline, setDriverOnline, activeRides, pendingRides,
+    acceptRide, declineRide, finishRide, logout, unreadByRide,
     myRides, fetchMyRides,
   } = useApp();
 
   const [declinedIds, setDeclinedIds] = useState<Set<string>>(new Set());
-  const [confirmingFinish, setConfirmingFinish] = useState(false);
+  // confirmingFinish is keyed by rideId — null means no confirmation in progress
+  const [confirmingFinishId, setConfirmingFinishId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showAmount, setShowAmount] = useState(true);
 
@@ -192,15 +193,14 @@ export default function DriverHome() {
     setDeclinedIds((prev) => new Set([...prev, rideId]));
   };
 
-  const handleFinish = async () => {
-    if (!activeRide) return;
-    if (!confirmingFinish) { setConfirmingFinish(true); return; }
-    setConfirmingFinish(false);
+  const handleFinish = async (rideId: string) => {
+    if (confirmingFinishId !== rideId) { setConfirmingFinishId(rideId); return; }
+    setConfirmingFinishId(null);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    await finishRide(activeRide.id);
+    await finishRide(rideId);
   };
 
-  const activeRides = pendingRides.filter((r) => !declinedIds.has(r.id));
+  const visiblePending = pendingRides.filter((r) => !declinedIds.has(r.id));
   const declinedRides = pendingRides.filter((r) => declinedIds.has(r.id));
   const totalEarned = myRides.reduce((sum, r) => sum + (r.price ?? 0), 0);
   const rating = user?.rating ?? 0;
@@ -333,84 +333,95 @@ export default function DriverHome() {
 
   const listHeader = (
     <View>
-      {activeRide && (
+      {activeRides.length > 0 && (
         <View>
-          <Text style={s.sectionTitle}>Corrida ativa</Text>
-          <View style={s.activeCard}>
-            <View style={s.activeBadge}>
-              <Feather name="navigation" size={16} color={colors.statusInProgress} />
-              <Text style={s.activeBadgeText}>Em andamento</Text>
-            </View>
-            <View style={s.clientRow}>
-              <UserAvatar name={activeRide.clientName} photo={activeRide.clientPhoto} size={50} mode="client" />
-              <View>
-                <Text style={s.clientName}>{activeRide.clientName}</Text>
-                <Text style={s.clientPhone}>{activeRide.clientPhone}</Text>
-                {(activeRide.clientAvgRating ?? 0) > 0 ? (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 }}>
-                    <StarRating rating={activeRide.clientAvgRating!} size={12} />
-                    <Text style={{ fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular" }}>
-                      {activeRide.clientAvgRating!.toFixed(1)}
-                    </Text>
+          <Text style={s.sectionTitle}>
+            {activeRides.length === 1 ? "Corrida em andamento" : `${activeRides.length} corridas em andamento`}
+          </Text>
+          {activeRides.map((ride) => {
+            const rideUnread = unreadByRide[ride.id] ?? 0;
+            const confirming = confirmingFinishId === ride.id;
+            return (
+              <View key={ride.id} style={s.activeCard}>
+                <View style={s.activeBadge}>
+                  <Feather name="navigation" size={16} color={colors.statusInProgress} />
+                  <Text style={s.activeBadgeText}>Em andamento</Text>
+                </View>
+                <View style={s.clientRow}>
+                  <UserAvatar name={ride.clientName} photo={ride.clientPhoto} size={50} mode="client" />
+                  <View>
+                    <Text style={s.clientName}>{ride.clientName}</Text>
+                    <Text style={s.clientPhone}>{ride.clientPhone}</Text>
+                    {(ride.clientAvgRating ?? 0) > 0 ? (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 }}>
+                        <StarRating rating={ride.clientAvgRating!} size={12} />
+                        <Text style={{ fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular" }}>
+                          {ride.clientAvgRating!.toFixed(1)}
+                        </Text>
+                      </View>
+                    ) : (
+                      <Text style={{ fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2 }}>
+                        Novo passageiro
+                      </Text>
+                    )}
                   </View>
-                ) : (
-                  <Text style={{ fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular", marginTop: 2 }}>
-                    Novo passageiro
-                  </Text>
-                )}
-              </View>
-            </View>
-            <View style={s.row}>
-              <View style={[s.dot, { backgroundColor: colors.statusAccepted }]} />
-              <Text style={s.routeText}>{activeRide.origin}</Text>
-            </View>
-            <View style={s.row}>
-              <View style={[s.dot, { backgroundColor: colors.statusInProgress }]} />
-              <Text style={s.routeText}>{activeRide.destination}</Text>
-            </View>
-            {activeRide.price !== undefined && (
-              <View style={s.priceRow}>
-                <Feather name="dollar-sign" size={14} color={colors.statusAccepted} />
-                <Text style={s.priceText}>R$ {activeRide.price.toFixed(2).replace(".", ",")}</Text>
-                <Text style={s.payText}>· {activeRide.payment === "pix" ? "PIX" : "Dinheiro"}</Text>
-              </View>
-            )}
-            <View style={s.activeActions}>
-              <View style={s.chatBtnWrap}>
-                <TouchableOpacity style={s.chatBtn} onPress={() => router.push("/chat")}>
-                  <Feather name="message-circle" size={18} color={colors.foreground} />
-                  <Text style={s.chatText}>Chat</Text>
-                </TouchableOpacity>
-                {unreadChatCount > 0 && (
-                  <View style={s.chatBadge}>
-                    <Text style={s.chatBadgeText}>{unreadChatCount > 99 ? "99+" : unreadChatCount}</Text>
+                </View>
+                <View style={s.row}>
+                  <View style={[s.dot, { backgroundColor: colors.statusAccepted }]} />
+                  <Text style={s.routeText}>{ride.origin}</Text>
+                </View>
+                <View style={s.row}>
+                  <View style={[s.dot, { backgroundColor: colors.statusInProgress }]} />
+                  <Text style={s.routeText}>{ride.destination}</Text>
+                </View>
+                {ride.price !== undefined && (
+                  <View style={s.priceRow}>
+                    <Feather name="dollar-sign" size={14} color={colors.statusAccepted} />
+                    <Text style={s.priceText}>R$ {ride.price.toFixed(2).replace(".", ",")}</Text>
+                    <Text style={s.payText}>· {ride.payment === "pix" ? "PIX" : "Dinheiro"}</Text>
                   </View>
                 )}
+                <View style={s.activeActions}>
+                  <View style={s.chatBtnWrap}>
+                    <TouchableOpacity
+                      style={s.chatBtn}
+                      onPress={() => router.push(`/chat?rideId=${ride.id}` as any)}
+                    >
+                      <Feather name="message-circle" size={18} color={colors.foreground} />
+                      <Text style={s.chatText}>Chat</Text>
+                    </TouchableOpacity>
+                    {rideUnread > 0 && (
+                      <View style={s.chatBadge}>
+                        <Text style={s.chatBadgeText}>{rideUnread > 99 ? "99+" : rideUnread}</Text>
+                      </View>
+                    )}
+                  </View>
+                  {confirming ? (
+                    <>
+                      <TouchableOpacity style={s.finishBtnConfirm} onPress={() => handleFinish(ride.id)}>
+                        <Feather name="flag" size={18} color="#fff" />
+                        <Text style={s.finishText}>Confirmar</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={s.cancelConfirmBtn} onPress={() => setConfirmingFinishId(null)}>
+                        <Text style={s.cancelConfirmText}>Voltar</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <TouchableOpacity style={s.finishBtn} onPress={() => handleFinish(ride.id)}>
+                      <Feather name="flag" size={18} color="#fff" />
+                      <Text style={s.finishText}>Finalizar</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
-              {confirmingFinish ? (
-                <>
-                  <TouchableOpacity style={s.finishBtnConfirm} onPress={handleFinish}>
-                    <Feather name="flag" size={18} color="#fff" />
-                    <Text style={s.finishText}>Confirmar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={s.cancelConfirmBtn} onPress={() => setConfirmingFinish(false)}>
-                    <Text style={s.cancelConfirmText}>Voltar</Text>
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <TouchableOpacity style={s.finishBtn} onPress={handleFinish}>
-                  <Feather name="flag" size={18} color="#fff" />
-                  <Text style={s.finishText}>Finalizar</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-          {activeRides.length > 0 && (
+            );
+          })}
+          {visiblePending.length > 0 && (
             <Text style={[s.sectionTitle, { marginTop: 4 }]}>Novas corridas</Text>
           )}
         </View>
       )}
-      {!activeRide && isDriverOnline && activeRides.length > 0 && (
+      {activeRides.length === 0 && isDriverOnline && visiblePending.length > 0 && (
         <Text style={s.sectionTitle}>Novas corridas</Text>
       )}
     </View>
@@ -488,7 +499,7 @@ export default function DriverHome() {
       <FlatList
         style={s.content}
         contentContainerStyle={{ paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 24 }}
-        data={isDriverOnline ? activeRides : []}
+        data={isDriverOnline ? visiblePending : []}
         keyExtractor={(r) => r.id}
         ListHeaderComponent={listHeader}
         renderItem={({ item }) => (
@@ -566,7 +577,7 @@ export default function DriverHome() {
               <MaterialCommunityIcons name="car-off" size={48} color={colors.mutedForeground} />
               <Text style={s.offlineText}>Você está offline{"\n"}Ative para receber corridas</Text>
             </View>
-          ) : !activeRide && declinedRides.length === 0 ? (
+          ) : activeRides.length === 0 && visiblePending.length === 0 && declinedRides.length === 0 ? (
             <View style={s.empty}>
               <MaterialCommunityIcons name="clock-outline" size={48} color={colors.mutedForeground} />
               <Text style={s.emptyText}>Aguardando corridas...</Text>

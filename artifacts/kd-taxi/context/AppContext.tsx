@@ -88,13 +88,17 @@ interface AppContextValue {
   updateProfile: (name: string, photo?: string) => Promise<void>;
   isDriverOnline: boolean;
   setDriverOnline: (online: boolean) => void;
+  // Clients use activeRide (single); drivers use activeRides (multiple)
   activeRide: Ride | null;
   setActiveRide: (ride: Ride | null) => void;
+  activeRides: Ride[];
   pendingRides: Ride[];
-  chatMessages: ChatMessage[];
-  sendChatMessage: (text: string) => void;
+  chatMessagesByRide: Record<string, ChatMessage[]>;
+  sendChatMessage: (text: string, rideId: string) => void;
   unreadChatCount: number;
-  markChatRead: () => void;
+  unreadByRide: Record<string, number>;
+  markChatRead: (rideId: string) => void;
+  fetchChatHistory: (rideId: string) => Promise<void>;
   socket: Socket | null;
   requestRide: (origin: string, destination: string, payment: "pix" | "dinheiro") => Promise<Ride | null>;
   acceptRide: (rideId: string) => Promise<void>;
@@ -121,8 +125,8 @@ interface AppContextValue {
   adminUpdateUser: (id: string, data: { name?: string; phone?: string; mode?: string; active?: boolean; password?: string }) => Promise<boolean>;
   adminDeleteUser: (id: string) => Promise<boolean>;
   adminClearRides: () => Promise<boolean>;
-  // Chat open state
-  setChatOpen: (open: boolean) => void;
+  // Chat open state — pass rideId so only that ride's unread count is cleared
+  setChatOpen: (open: boolean, rideId?: string) => void;
   // Auth
   token: string | null;
   login: (phone: string, password: string) => Promise<{ ok: boolean; error?: string }>;
@@ -197,9 +201,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const tokenRef = useRef<string | null>(null);
   const [isDriverOnline, setDriverOnlineState] = useState(false);
   const [activeRide, setActiveRide] = useState<Ride | null>(null);
+  const [activeRides, setActiveRides] = useState<Ride[]>([]);
   const [pendingRides, setPendingRides] = useState<Ride[]>([]);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [chatMessagesByRide, setChatMessagesByRide] = useState<Record<string, ChatMessage[]>>({});
+  const [unreadByRide, setUnreadByRide] = useState<Record<string, number>>({});
   const [allRides, setAllRides] = useState<Ride[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [pricing, setPricing] = useState<PriceRule[]>([]);
@@ -209,11 +214,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const socketRef = useRef<Socket | null>(null);
   const userRef = useRef<User | null>(null);
   const activeRideRef = useRef<Ride | null>(null);
+  const activeRidesRef = useRef<Ride[]>([]);
   const isDriverOnlineRef = useRef(false);
-  const isChatOpenRef = useRef(false);
+  // Stores the rideId whose chat is currently visible (null = no chat screen open)
+  const isChatOpenRef = useRef<string | null>(null);
+  // Timeout handles for the repeating ride-alert sound (cleared on accept/decline)
+  const soundTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   useEffect(() => { userRef.current = user; }, [user]);
   useEffect(() => { activeRideRef.current = activeRide; }, [activeRide]);
+  useEffect(() => { activeRidesRef.current = activeRides; }, [activeRides]);
   useEffect(() => { isDriverOnlineRef.current = isDriverOnline; }, [isDriverOnline]);
 
   // Load persisted state
@@ -414,9 +424,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (exists) return prev;
           return [ride, ...prev];
         });
-        // Only play sound and notify when driver is online
+        // Only play sound and notify when driver is online.
+        // Sound repeats up to 3 times (every 4 s) — timers are cancelled
+        // automatically when the driver accepts or declines the ride.
         if (isDriverOnlineRef.current) {
-          playRideRequestSound();
+          let plays = 0;
+          const schedulePlay = () => {
+            playRideRequestSound();
+            plays++;
+            if (plays < 3) {
+              const t = setTimeout(schedulePlay, 4000);
+              soundTimersRef.current.push(t);
+            }
+          };
+          schedulePlay();
           Notifications.scheduleNotificationAsync({
             content: {
               title: "Nova corrida!",
@@ -431,53 +452,68 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     socket.on("corrida_aceita", (ride: Ride) => {
       const me = userRef.current;
-      const isInvolved = me?.id === ride.driverId || me?.id === ride.clientId;
-      // Only set as active ride for the driver who accepted or the client who requested it
-      if (isInvolved) {
+      if (me?.mode === "driver" && me?.id === ride.driverId) {
+        // Driver who accepted: add to their active rides list (they may run
+        // multiple rides simultaneously — each one stays until finished).
+        setActiveRides((prev) => {
+          if (prev.some((r) => r.id === ride.id)) return prev;
+          return [...prev, ride];
+        });
+      } else if (me?.id === ride.clientId) {
+        // Client whose ride was accepted: set their single active ride.
         setActiveRide(ride);
-      }
-      // All drivers: remove from pending list (ride is taken)
-      if (me?.mode === "driver") {
-        setPendingRides((prev) => prev.filter((r) => r.id !== ride.id));
-      }
-      // Notify only the client whose ride was accepted
-      if (me?.id === ride.clientId) {
         Notifications.scheduleNotificationAsync({
           content: { title: "Motorista encontrado!", body: `${ride.driverName} está a caminho`, sound: true },
           trigger: null,
         }).catch(() => {});
       }
+      // All drivers: remove from pending list regardless of who accepted
+      if (me?.mode === "driver") {
+        setPendingRides((prev) => prev.filter((r) => r.id !== ride.id));
+      }
     });
 
     socket.on("corrida_finalizada", (ride: Ride) => {
       const me = userRef.current;
-      // Only update state for the driver or client involved in this ride
-      if (me?.id !== ride.driverId && me?.id !== ride.clientId) return;
-      setActiveRide(null);
-      setFinishedRideToRate(ride);
-      setMyRides((prev) => [ride, ...prev.filter((r) => r.id !== ride.id)]);
-      Notifications.scheduleNotificationAsync({
-        content: { title: "Corrida finalizada!", body: "Avalie sua experiência", sound: true },
-        trigger: null,
-      }).catch(() => {});
+      if (me?.mode === "driver" && me?.id === ride.driverId) {
+        setActiveRides((prev) => prev.filter((r) => r.id !== ride.id));
+        setMyRides((prev) => [ride, ...prev.filter((r) => r.id !== ride.id)]);
+        setFinishedRideToRate(ride);
+        Notifications.scheduleNotificationAsync({
+          content: { title: "Corrida finalizada!", body: "Avalie sua experiência", sound: true },
+          trigger: null,
+        }).catch(() => {});
+      } else if (me?.id === ride.clientId) {
+        setActiveRide(null);
+        setFinishedRideToRate(ride);
+        setMyRides((prev) => [ride, ...prev.filter((r) => r.id !== ride.id)]);
+        Notifications.scheduleNotificationAsync({
+          content: { title: "Corrida finalizada!", body: "Avalie sua experiência", sound: true },
+          trigger: null,
+        }).catch(() => {});
+      }
     });
 
     socket.on("corrida_cancelada", (rideId: string) => {
       const me = userRef.current;
-      // All drivers: remove from pending (client cancelled before anyone accepted)
       if (me?.mode === "driver") {
         setPendingRides((prev) => prev.filter((r) => r.id !== rideId));
+        setActiveRides((prev) => prev.filter((r) => r.id !== rideId));
       }
-      // Only clear active ride for the users directly involved
       setActiveRide((prev) => (prev?.id === rideId ? null : prev));
     });
 
     socket.on("mensagem_chat", (msg: ChatMessage) => {
-      setChatMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+      // Deduplicate by id, then append to the per-ride bucket
+      setChatMessagesByRide((prev) => {
+        const existing = prev[msg.rideId] ?? [];
+        if (existing.some((m) => m.id === msg.id)) return prev;
+        return { ...prev, [msg.rideId]: [...existing, msg] };
+      });
       if (msg.senderId !== userRef.current?.id) {
-        // Only increment badge and notify when chat screen is not open
-        if (!isChatOpenRef.current) {
-          setUnreadChatCount((c) => c + 1);
+        // Only increment and notify when the relevant chat screen is not open
+        if (isChatOpenRef.current !== msg.rideId) {
+          setUnreadByRide((prev) => ({ ...prev, [msg.rideId]: (prev[msg.rideId] ?? 0) + 1 }));
           Notifications.scheduleNotificationAsync({
             content: { title: `Mensagem de ${msg.senderName}`, body: msg.text, sound: true },
             trigger: null,
@@ -490,31 +526,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       socket.off("connect", reconcile);
       socket.disconnect();
       socketRef.current = null;
+      // Cancel any pending sound repeat timers when connection is torn down
+      soundTimersRef.current.forEach(clearTimeout);
+      soundTimersRef.current = [];
     };
   }, [user, token]);
-
-  // Chat history is now persisted server-side, so whenever the active ride
-  // changes (e.g. after a reconnect reconciliation or app relaunch) fetch
-  // the full history instead of relying only on messages that arrived while
-  // the socket happened to be connected.
-  useEffect(() => {
-    if (!activeRide) {
-      setChatMessages([]);
-      return;
-    }
-    authFetch(`/rides/${activeRide.id}/chat`)
-      .then((res) => (res.ok ? res.json() : []))
-      .then((history: ChatMessage[]) => {
-        setChatMessages((prev) => {
-          const merged = [...history];
-          for (const m of prev) {
-            if (!merged.some((h) => h.id === m.id)) merged.push(m);
-          }
-          return merged;
-        });
-      })
-      .catch(() => {});
-  }, [activeRide?.id]);
 
   const requestRide = useCallback(async (origin: string, destination: string, payment: "pix" | "dinheiro"): Promise<Ride | null> => {
     if (!user) return null;
@@ -534,6 +550,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const acceptRide = useCallback(async (rideId: string) => {
     if (!user) return;
+    // Cancel any pending sound repeats — driver is actively responding
+    soundTimersRef.current.forEach(clearTimeout);
+    soundTimersRef.current = [];
     const res = await authFetch(`/accept-ride`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -541,12 +560,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
     if (res.ok) {
       const ride: Ride = await res.json();
-      setActiveRide(ride);
+      // Add to driver's active rides (socket event also does this, but we
+      // handle it here too so the UI responds immediately without waiting
+      // for the round-trip echo).
+      setActiveRides((prev) => (prev.some((r) => r.id === ride.id) ? prev : [...prev, ride]));
       setPendingRides((prev) => prev.filter((r) => r.id !== rideId));
     }
   }, [user, authFetch]);
 
   const declineRide = useCallback((rideId: string) => {
+    // Cancel pending sound repeats when driver declines
+    soundTimersRef.current.forEach(clearTimeout);
+    soundTimersRef.current = [];
     setPendingRides((prev) => prev.filter((r) => r.id !== rideId));
   }, []);
 
@@ -559,9 +584,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (res.ok) {
       const ride: Ride = await res.json();
       setActiveRide(null);
+      setActiveRides((prev) => prev.filter((r) => r.id !== rideId));
       setFinishedRideToRate(ride);
       setMyRides((prev) => [ride, ...prev.filter((r) => r.id !== ride.id)]);
-      setChatMessages([]);
+      setChatMessagesByRide((prev) => { const next = { ...prev }; delete next[rideId]; return next; });
     }
   }, [authFetch]);
 
@@ -572,7 +598,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       body: JSON.stringify({ rideId }),
     });
     setActiveRide(null);
-    setChatMessages([]);
+    setActiveRides((prev) => prev.filter((r) => r.id !== rideId));
+    setChatMessagesByRide((prev) => { const next = { ...prev }; delete next[rideId]; return next; });
   }, [authFetch]);
 
   const rateRide = useCallback(async (rideId: string, rating: number) => {
@@ -585,18 +612,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setFinishedRideToRate(null);
   }, [user, authFetch]);
 
-  const sendChatMessage = useCallback((text: string) => {
-    if (!user || !activeRide || !socketRef.current) return;
-    // Identity, id, and timestamp are now assigned authoritatively by the
-    // server (see index.ts), which then echoes the message back to every
-    // participant's room including our own — so we don't optimistically
-    // append here, avoiding duplicate entries once the echo arrives.
-    socketRef.current.emit("mensagem_chat", { rideId: activeRide.id, text });
-  }, [user, activeRide]);
+  const sendChatMessage = useCallback((text: string, rideId: string) => {
+    if (!user || !socketRef.current) return;
+    socketRef.current.emit("mensagem_chat", { rideId, text });
+  }, [user]);
 
-  const markChatRead = useCallback(() => {
-    setUnreadChatCount(0);
+  const markChatRead = useCallback((rideId: string) => {
+    setUnreadByRide((prev) => ({ ...prev, [rideId]: 0 }));
   }, []);
+
+  const fetchChatHistory = useCallback(async (rideId: string) => {
+    try {
+      const res = await authFetch(`/rides/${rideId}/chat`);
+      if (!res.ok) return;
+      const history: ChatMessage[] = await res.json();
+      setChatMessagesByRide((prev) => {
+        const existing = prev[rideId] ?? [];
+        const merged = [...history];
+        for (const m of existing) {
+          if (!merged.some((h) => h.id === m.id)) merged.push(m);
+        }
+        return { ...prev, [rideId]: merged };
+      });
+    } catch {}
+  }, [authFetch]);
 
   const logout = useCallback(() => {
     if (tokenRef.current) {
@@ -605,13 +644,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setToken(null);
     setActiveRide(null);
+    setActiveRides([]);
     setPendingRides([]);
-    setChatMessages([]);
+    setChatMessagesByRide({});
+    setUnreadByRide({});
     setMyRides([]);
-    setUnreadChatCount(0);
     setFinishedRideToRate(null);
     setDriverOnlineState(false);
     setAdminStats(null);
+    soundTimersRef.current.forEach(clearTimeout);
+    soundTimersRef.current = [];
     AsyncStorage.multiRemove(["kd_driver_online", "kd_active_ride"]);
   }, [setUser, setToken, authFetch]);
 
@@ -709,18 +751,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return false;
   }, [authFetch]);
 
-  const setChatOpen = useCallback((open: boolean) => {
-    isChatOpenRef.current = open;
-    if (open) setUnreadChatCount(0);
+  const setChatOpen = useCallback((open: boolean, rideId?: string) => {
+    isChatOpenRef.current = open ? (rideId ?? null) : null;
+    if (open && rideId) {
+      setUnreadByRide((prev) => ({ ...prev, [rideId]: 0 }));
+    }
   }, []);
+
+  const unreadChatCount = Object.values(unreadByRide).reduce((a, b) => a + b, 0);
 
   return (
     <AppContext.Provider value={{
       user, setUser, updateProfile,
       isDriverOnline, setDriverOnline,
-      activeRide, setActiveRide,
-      pendingRides, chatMessages, sendChatMessage,
-      unreadChatCount, markChatRead,
+      activeRide, setActiveRide, activeRides,
+      pendingRides, chatMessagesByRide, sendChatMessage,
+      unreadChatCount, unreadByRide, markChatRead, fetchChatHistory,
       socket: socketRef.current,
       requestRide, acceptRide, declineRide, finishRide, cancelRide, rateRide,
       logout, allRides, allUsers, pricing,
