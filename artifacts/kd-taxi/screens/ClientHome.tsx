@@ -271,6 +271,9 @@ export default function ClientHome() {
             <Text style={s.userName}>{user?.name}</Text>
           </View>
           <View style={s.headerRight}>
+            <TouchableOpacity style={{ padding: 4 }} onPress={() => router.push("/my-rides" as any)}>
+              <Feather name="list" size={20} color={colors.mutedForeground} />
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => router.push("/profile")}>
               <UserAvatar name={user?.name ?? "?"} photo={user?.photo} size={40} mode="client" />
             </TouchableOpacity>

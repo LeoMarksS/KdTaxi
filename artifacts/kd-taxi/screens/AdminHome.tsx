@@ -285,6 +285,15 @@ export default function AdminHome() {
       width: 36, height: 36, borderRadius: 18, backgroundColor: colors.muted,
       alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border,
     },
+    onlineDot: {
+      position: "absolute", bottom: 1, right: 1,
+      width: 13, height: 13, borderRadius: 7,
+      borderWidth: 2, borderColor: colors.card,
+    },
+    onlineBadge: {
+      borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2,
+    },
+    onlineBadgeText: { fontSize: 11, fontWeight: "700", fontFamily: "Inter_700Bold" },
     empty: { alignItems: "center", paddingVertical: 48, gap: 12 },
     emptyText: { fontSize: 15, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
     pricingContent: { flex: 1, paddingHorizontal: 24 },
@@ -373,29 +382,52 @@ export default function AdminHome() {
     { id: "pricing", label: "Preços", icon: "dollar-sign" },
   ];
 
-  const renderUserCard = (item: User) => (
-    <View style={s.userCard} key={item.id}>
-      <UserAvatar name={item.name} photo={item.photo} size={46} mode={item.mode as any} />
-      <View style={s.userInfo}>
-        <Text style={s.userName}>{item.name}</Text>
-        <Text style={s.userPhone}>{item.phone}</Text>
-        {(item as any).rating > 0 ? (
-          <View style={s.userRatingRow}>
-            <View style={s.userRatingBadge}>
-              <Feather name="star" size={12} color={colors.primary} />
-              <Text style={s.userRatingText}>{(item as any).rating.toFixed(1)}</Text>
-            </View>
-            <Text style={s.userRideCount}>{(item as any).rideCount} corrida{(item as any).rideCount !== 1 ? "s" : ""}</Text>
+  const renderUserCard = (item: User) => {
+    const isOnline = item.mode === "driver" && (item as any).active === true;
+    return (
+      <View style={s.userCard} key={item.id}>
+        <View style={{ position: "relative" }}>
+          <UserAvatar name={item.name} photo={item.photo} size={46} mode={item.mode as any} />
+          {item.mode === "driver" && (
+            <View style={[
+              s.onlineDot,
+              { backgroundColor: isOnline ? "#4CAF50" : colors.mutedForeground + "66" },
+            ]} />
+          )}
+        </View>
+        <View style={s.userInfo}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Text style={s.userName}>{item.name}</Text>
+            {item.mode === "driver" && (
+              <View style={[
+                s.onlineBadge,
+                { backgroundColor: isOnline ? "#4CAF50" + "22" : colors.muted },
+              ]}>
+                <Text style={[s.onlineBadgeText, { color: isOnline ? "#4CAF50" : colors.mutedForeground }]}>
+                  {isOnline ? "Online" : "Offline"}
+                </Text>
+              </View>
+            )}
           </View>
-        ) : (
-          <Text style={s.noRating}>Sem avaliações ainda</Text>
-        )}
+          <Text style={s.userPhone}>{item.phone}</Text>
+          {(item as any).rating > 0 ? (
+            <View style={s.userRatingRow}>
+              <View style={s.userRatingBadge}>
+                <Feather name="star" size={12} color={colors.primary} />
+                <Text style={s.userRatingText}>{(item as any).rating.toFixed(1)}</Text>
+              </View>
+              <Text style={s.userRideCount}>{(item as any).rideCount} corrida{(item as any).rideCount !== 1 ? "s" : ""}</Text>
+            </View>
+          ) : (
+            <Text style={s.noRating}>Sem avaliações ainda</Text>
+          )}
+        </View>
+        <TouchableOpacity style={s.editBtn} onPress={() => setEditingUser(item)}>
+          <Feather name="edit-2" size={15} color={colors.mutedForeground} />
+        </TouchableOpacity>
       </View>
-      <TouchableOpacity style={s.editBtn} onPress={() => setEditingUser(item)}>
-        <Feather name="edit-2" size={15} color={colors.mutedForeground} />
-      </TouchableOpacity>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={s.container}>

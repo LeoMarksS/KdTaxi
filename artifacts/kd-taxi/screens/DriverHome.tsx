@@ -294,6 +294,12 @@ export default function DriverHome() {
       alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8,
     },
     finishText: { fontSize: 16, fontWeight: "700", color: "#fff", fontFamily: "Inter_700Bold" },
+    detailsBtn: {
+      flexDirection: "row", alignItems: "center", gap: 8,
+      backgroundColor: colors.muted, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14,
+      borderWidth: 1, borderColor: colors.border, marginBottom: 10,
+    },
+    detailsBtnText: { fontSize: 14, color: colors.foreground, fontFamily: "Inter_500Medium", flex: 1 },
     cancelConfirmBtn: {
       flex: 1, backgroundColor: colors.muted, borderRadius: 14, paddingVertical: 14,
       alignItems: "center", borderWidth: 1, borderColor: colors.border,
@@ -381,6 +387,19 @@ export default function DriverHome() {
                     <Text style={s.payText}>· {ride.payment === "pix" ? "PIX" : "Dinheiro"}</Text>
                   </View>
                 )}
+                <TouchableOpacity
+                  style={s.detailsBtn}
+                  onPress={() => router.push(`/ride-detail?rideId=${ride.id}` as any)}
+                >
+                  <Feather name="user" size={15} color={colors.foreground} />
+                  <Text style={s.detailsBtnText}>Ver detalhes e chat</Text>
+                  {rideUnread > 0 && (
+                    <View style={s.chatBadge}>
+                      <Text style={s.chatBadgeText}>{rideUnread > 99 ? "99+" : rideUnread}</Text>
+                    </View>
+                  )}
+                  <Feather name="chevron-right" size={16} color={colors.mutedForeground} style={{ marginLeft: "auto" }} />
+                </TouchableOpacity>
                 <View style={s.activeActions}>
                   <View style={s.chatBtnWrap}>
                     <TouchableOpacity
@@ -441,9 +460,14 @@ export default function DriverHome() {
               <Text style={s.userSub}>Motorista</Text>
             </View>
           </View>
-          <TouchableOpacity style={{ padding: 8 }} onPress={logout}>
-            <Feather name="log-out" size={22} color={colors.mutedForeground} />
-          </TouchableOpacity>
+          <View style={s.headerActions}>
+            <TouchableOpacity style={{ padding: 8 }} onPress={() => router.push("/my-rides" as any)}>
+              <Feather name="list" size={22} color={colors.mutedForeground} />
+            </TouchableOpacity>
+            <TouchableOpacity style={{ padding: 8 }} onPress={logout}>
+              <Feather name="log-out" size={22} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Stats row */}

@@ -71,12 +71,20 @@ export default function ProfileScreen() {
     ]);
   };
 
+  const hasChanges = name.trim() !== (user?.name ?? "") || photo !== user?.photo;
+
   const handleSave = async () => {
     if (!name.trim()) return;
     setSaving(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     await updateProfile(name.trim(), photo);
     setSaving(false);
+    router.back();
+  };
+
+  const handleCancel = () => {
+    setName(user?.name ?? "");
+    setPhoto(user?.photo);
     router.back();
   };
 
@@ -128,6 +136,11 @@ export default function ProfileScreen() {
       alignItems: "center", marginBottom: 16, flexDirection: "row", justifyContent: "center", gap: 8,
     },
     saveBtnText: { fontSize: 17, fontWeight: "700", color: "#000", fontFamily: "Inter_700Bold" },
+    cancelBtn: {
+      backgroundColor: colors.muted, borderRadius: 14, paddingVertical: 16,
+      alignItems: "center", marginBottom: 12, borderWidth: 1, borderColor: colors.border,
+    },
+    cancelBtnText: { fontSize: 16, color: colors.mutedForeground, fontFamily: "Inter_500Medium" },
     logoutBtn: {
       backgroundColor: colors.card, borderRadius: 14, paddingVertical: 16,
       alignItems: "center", borderWidth: 1, borderColor: colors.border, marginBottom: 32,
@@ -195,6 +208,14 @@ export default function ProfileScreen() {
                 <Text style={s.saveBtnText}>Salvar perfil</Text>
               </>
             )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[s.cancelBtn, { opacity: saving ? 0.5 : 1 }]}
+            onPress={handleCancel}
+            disabled={saving}
+          >
+            <Text style={s.cancelBtnText}>Descartar alterações</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={s.logoutBtn} onPress={() => { logout(); router.replace("/login"); }}>
