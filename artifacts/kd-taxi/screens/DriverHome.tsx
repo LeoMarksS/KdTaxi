@@ -98,7 +98,6 @@ function RideCard({ ride, onAccept, onDecline, compact }: {
           <UserAvatar name={ride.clientName} photo={ride.clientPhoto} size={compact ? 36 : 48} mode="client" />
           <View>
             <Text style={s.clientName}>{ride.clientName}</Text>
-            {!compact && <Text style={s.clientPhone}>{ride.clientPhone}</Text>}
             {(ride.clientAvgRating ?? 0) > 0 ? (
               <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 }}>
                 <StarRating rating={ride.clientAvgRating!} size={12} />
@@ -358,7 +357,6 @@ export default function DriverHome() {
                   <UserAvatar name={ride.clientName} photo={ride.clientPhoto} size={50} mode="client" />
                   <View>
                     <Text style={s.clientName}>{ride.clientName}</Text>
-                    <Text style={s.clientPhone}>{ride.clientPhone}</Text>
                     {(ride.clientAvgRating ?? 0) > 0 ? (
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 }}>
                         <StarRating rating={ride.clientAvgRating!} size={12} />

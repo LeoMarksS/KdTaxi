@@ -329,7 +329,7 @@ router.post("/users/:id/active", requireAuth, (req: Request, res: Response) => {
   if (req.authUser!.id !== (req.params.id as string)) { res.status(403).json({ error: "Acesso negado" }); return; }
   const user = users.get((req.params.id as string));
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
-  user.active = req.body.active;
+  user.active = req.body.active === true;
   res.json(safeUser(user));
 });
 

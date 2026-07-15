@@ -128,6 +128,14 @@ export default function ChatScreen() {
     if (rideId) fetchChatHistory(rideId);
   }, [rideId]);
 
+  // When the ride finishes while the client is in chat, navigate back after a
+  // brief moment so the user can see the "Corrida encerrada" banner first.
+  useEffect(() => {
+    if (!isFinished || user?.mode !== "client") return;
+    const t = setTimeout(() => router.back(), 1800);
+    return () => clearTimeout(t);
+  }, [isFinished, user?.mode]);
+
   const handleSend = () => {
     if (!text.trim() || !rideId) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

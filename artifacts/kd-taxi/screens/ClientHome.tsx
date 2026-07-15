@@ -2,7 +2,7 @@ import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -83,6 +83,17 @@ export default function ClientHome() {
   useEffect(() => {
     setConfirmingCancel(false);
   }, [activeRide?.id]);
+
+  // Clear search form when the ride finishes (activeRide goes non-null → null)
+  const prevActiveRideRef = useRef<typeof activeRide | undefined>(undefined);
+  useEffect(() => {
+    if (prevActiveRideRef.current != null && activeRide == null) {
+      setOrigin("");
+      setDestination("");
+      setPriceResult(null);
+    }
+    prevActiveRideRef.current = activeRide;
+  }, [activeRide]);
 
   const pulseStyle = useAnimatedStyle(() => ({ transform: [{ scale: pulseScale.value }] }));
 
