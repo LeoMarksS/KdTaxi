@@ -89,7 +89,7 @@ export default function ChatScreen() {
   const { rideId } = useLocalSearchParams<{ rideId: string }>();
   const {
     user, chatMessagesByRide, sendChatMessage,
-    activeRide, activeRides, markChatRead, setChatOpen, fetchChatHistory,
+    activeRide, activeRides, myRides, markChatRead, setChatOpen, fetchChatHistory,
   } = useApp();
   const [text, setText] = useState("");
   const flatRef = useRef<FlatList>(null);
@@ -99,6 +99,13 @@ export default function ChatScreen() {
   const ride = user?.mode === "driver"
     ? activeRides.find((r) => r.id === rideId)
     : (activeRide?.id === rideId ? activeRide : undefined);
+
+  // Ride found in myRides means it's already finished — read-only chat
+  const finishedRide = !ride && rideId
+    ? myRides.find((r) => r.id === rideId)
+    : undefined;
+  const rideInfo = ride ?? finishedRide;
+  const isFinished = !ride && !!finishedRide;
 
   const messages = (rideId ? chatMessagesByRide[rideId] : undefined) ?? [];
 
@@ -128,8 +135,8 @@ export default function ChatScreen() {
     setText("");
   };
 
-  const otherPerson = user?.mode === "client" ? ride?.driverName : ride?.clientName;
-  const otherPhoto = user?.mode === "client" ? ride?.driverPhoto : ride?.clientPhoto;
+  const otherPerson = user?.mode === "client" ? rideInfo?.driverName : rideInfo?.clientName;
+  const otherPhoto = user?.mode === "client" ? rideInfo?.driverPhoto : rideInfo?.clientPhoto;
   const otherMode = user?.mode === "client" ? "driver" : "client";
 
   const s = StyleSheet.create({
@@ -184,6 +191,23 @@ export default function ChatScreen() {
       alignItems: "center",
       justifyContent: "center",
     },
+    finishedBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      paddingVertical: 16,
+      paddingHorizontal: 24,
+      paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 16,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      backgroundColor: colors.muted,
+    },
+    finishedText: {
+      fontSize: 13,
+      color: colors.mutedForeground,
+      fontFamily: "Inter_500Medium",
+    },
   });
 
   return (
@@ -200,7 +224,7 @@ export default function ChatScreen() {
         <View style={s.headerInfo}>
           <Text style={s.headerTitle}>{otherPerson ?? "Chat"}</Text>
           <Text style={s.headerSub}>
-            {ride?.origin} → {ride?.destination}
+            {rideInfo?.origin} → {rideInfo?.destination}
           </Text>
         </View>
       </View>
@@ -228,23 +252,30 @@ export default function ChatScreen() {
           }
         />
 
-        <View style={s.inputArea}>
-          <TextInput
-            style={s.input}
-            value={text}
-            onChangeText={setText}
-            placeholder="Mensagem..."
-            placeholderTextColor={colors.mutedForeground}
-            multiline
-          />
-          <TouchableOpacity
-            style={[s.sendBtn, { opacity: text.trim() ? 1 : 0.4 }]}
-            onPress={handleSend}
-            disabled={!text.trim()}
-          >
-            <Feather name="send" size={18} color="#000" />
-          </TouchableOpacity>
-        </View>
+        {isFinished ? (
+          <View style={s.finishedBanner}>
+            <Feather name="flag" size={14} color={colors.mutedForeground} />
+            <Text style={s.finishedText}>Corrida encerrada — conversa bloqueada</Text>
+          </View>
+        ) : (
+          <View style={s.inputArea}>
+            <TextInput
+              style={s.input}
+              value={text}
+              onChangeText={setText}
+              placeholder="Mensagem..."
+              placeholderTextColor={colors.mutedForeground}
+              multiline
+            />
+            <TouchableOpacity
+              style={[s.sendBtn, { opacity: text.trim() ? 1 : 0.4 }]}
+              onPress={handleSend}
+              disabled={!text.trim()}
+            >
+              <Feather name="send" size={18} color="#000" />
+            </TouchableOpacity>
+          </View>
+        )}
       </KeyboardAvoidingView>
     </View>
   );

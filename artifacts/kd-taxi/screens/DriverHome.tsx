@@ -150,7 +150,7 @@ export default function DriverHome() {
   const {
     user, isDriverOnline, setDriverOnline, activeRides, pendingRides,
     acceptRide, declineRide, finishRide, logout, unreadByRide,
-    myRides, fetchMyRides,
+    myRides, fetchMyRides, cancelSoundAlerts,
   } = useApp();
 
   const [declinedIds, setDeclinedIds] = useState<Set<string>>(new Set());
@@ -190,6 +190,7 @@ export default function DriverHome() {
 
   const handleDecline = (rideId: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    cancelSoundAlerts();
     setDeclinedIds((prev) => new Set([...prev, rideId]));
   };
 

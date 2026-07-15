@@ -107,6 +107,7 @@ interface AppContextValue {
   finishRide: (rideId: string) => Promise<void>;
   cancelRide: (rideId: string) => Promise<void>;
   rateRide: (rideId: string, rating: number) => Promise<void>;
+  cancelSoundAlerts: () => void;
   logout: () => void;
   allRides: Ride[];
   allUsers: User[];
@@ -289,6 +290,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const setDriverOnline = useCallback((online: boolean) => {
     setDriverOnlineState(online);
     AsyncStorage.setItem("kd_driver_online", online ? "true" : "false");
+    // Sync online/offline status to server so admin dashboard reflects reality
+    const uid = userRef.current?.id;
+    if (uid) {
+      authFetch(`/users/${uid}/active`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active: online }),
+      }).catch(() => {});
+    }
     if (online) {
       authFetch(`/rides`)
         .then((r) => (r.ok ? r.json() : []))
@@ -303,7 +313,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         })
         .catch(() => {});
     }
-  }, []);
+  }, [authFetch]);
 
   const updateProfile = useCallback(async (name: string, photo?: string) => {
     if (!user) return;
@@ -569,6 +579,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [user, authFetch]);
 
+  const cancelSoundAlerts = useCallback(() => {
+    soundTimersRef.current.forEach(clearTimeout);
+    soundTimersRef.current = [];
+  }, []);
+
   const declineRide = useCallback((rideId: string) => {
     // Cancel pending sound repeats when driver declines
     soundTimersRef.current.forEach(clearTimeout);
@@ -769,7 +784,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       pendingRides, chatMessagesByRide, sendChatMessage,
       unreadChatCount, unreadByRide, markChatRead, fetchChatHistory,
       socket: socketRef.current,
-      requestRide, acceptRide, declineRide, finishRide, cancelRide, rateRide,
+      requestRide, acceptRide, declineRide, finishRide, cancelRide, rateRide, cancelSoundAlerts,
       logout, allRides, allUsers, pricing,
       myRides, fetchMyRides,
       adminStats, refreshAdminData, refreshAdminStats, refreshPricing,
