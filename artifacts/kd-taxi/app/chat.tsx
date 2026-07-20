@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useApp } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
+import { RatingModal } from "@/components/RatingModal";
 import { UserAvatar } from "@/components/UserAvatar";
 import type { ChatMessage } from "@/context/AppContext";
 
@@ -90,6 +91,7 @@ export default function ChatScreen() {
   const {
     user, chatMessagesByRide, sendChatMessage,
     activeRide, activeRides, myRides, markChatRead, setChatOpen, fetchChatHistory,
+    finishedRideToRate,
   } = useApp();
   const [text, setText] = useState("");
   const flatRef = useRef<FlatList>(null);
@@ -128,13 +130,18 @@ export default function ChatScreen() {
     if (rideId) fetchChatHistory(rideId);
   }, [rideId]);
 
-  // When the ride finishes while the client is in chat, navigate back after a
-  // brief moment so the user can see the "Corrida encerrada" banner first.
+  // When the client is in chat and the ride finishes, the RatingModal pops up
+  // (rendered below). After the client rates or skips, finishedRideToRate is
+  // cleared → navigate back to the search screen at that moment.
+  const prevRatingRef = useRef<typeof finishedRideToRate>(undefined);
   useEffect(() => {
-    if (!isFinished || user?.mode !== "client") return;
-    const t = setTimeout(() => router.back(), 1800);
-    return () => clearTimeout(t);
-  }, [isFinished, user?.mode]);
+    const wasSet = prevRatingRef.current != null;
+    const nowCleared = finishedRideToRate == null;
+    if (wasSet && nowCleared && isFinished && user?.mode === "client") {
+      router.back();
+    }
+    prevRatingRef.current = finishedRideToRate;
+  }, [finishedRideToRate, isFinished, user?.mode]);
 
   const handleSend = () => {
     if (!text.trim() || !rideId) return;
@@ -220,6 +227,7 @@ export default function ChatScreen() {
 
   return (
     <View style={s.container}>
+      {user?.mode === "client" && <RatingModal />}
       <View style={s.header}>
         <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
           <Feather name="chevron-left" size={26} color={colors.foreground} />
