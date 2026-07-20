@@ -1,7 +1,7 @@
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator, FlatList, Platform, ScrollView, StyleSheet,
+  ActivityIndicator, Alert, FlatList, Platform, ScrollView, StyleSheet,
   Text, TextInput, TouchableOpacity, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -445,7 +445,12 @@ export default function AdminHome() {
           <Text style={s.title}>Admin</Text>
           <Text style={s.sub}>KD TAXI Dashboard</Text>
         </View>
-        <TouchableOpacity style={{ padding: 8 }} onPress={logout}>
+        <TouchableOpacity style={{ padding: 8 }} onPress={() => {
+          Alert.alert("Sair da conta", "Tem certeza que deseja sair?", [
+            { text: "Cancelar", style: "cancel" },
+            { text: "Sair", style: "destructive", onPress: logout },
+          ]);
+        }}>
           <Feather name="log-out" size={22} color={colors.mutedForeground} />
         </TouchableOpacity>
       </View>

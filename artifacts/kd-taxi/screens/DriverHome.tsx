@@ -4,7 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  FlatList, Platform, StyleSheet, Text, TouchableOpacity, View,
+  Alert, FlatList, Platform, StyleSheet, Text, TouchableOpacity, View,
 } from "react-native";
 import Animated, {
   useAnimatedStyle, useSharedValue, withSpring, withTiming,
@@ -463,7 +463,12 @@ export default function DriverHome() {
             <TouchableOpacity style={{ padding: 8 }} onPress={() => router.push("/my-rides" as any)}>
               <Feather name="list" size={22} color={colors.mutedForeground} />
             </TouchableOpacity>
-            <TouchableOpacity style={{ padding: 8 }} onPress={logout}>
+            <TouchableOpacity style={{ padding: 8 }} onPress={() => {
+              Alert.alert("Sair da conta", "Tem certeza que deseja sair?", [
+                { text: "Cancelar", style: "cancel" },
+                { text: "Sair", style: "destructive", onPress: logout },
+              ]);
+            }}>
               <Feather name="log-out" size={22} color={colors.mutedForeground} />
             </TouchableOpacity>
           </View>

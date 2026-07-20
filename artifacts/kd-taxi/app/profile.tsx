@@ -218,7 +218,12 @@ export default function ProfileScreen() {
             <Text style={s.cancelBtnText}>Descartar alterações</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={s.logoutBtn} onPress={() => { logout(); router.replace("/login"); }}>
+          <TouchableOpacity style={s.logoutBtn} onPress={() => {
+            Alert.alert("Sair da conta", "Tem certeza que deseja sair?", [
+              { text: "Cancelar", style: "cancel" },
+              { text: "Sair", style: "destructive", onPress: () => { logout(); router.replace("/login"); } },
+            ]);
+          }}>
             <Text style={s.logoutText}>Sair da conta</Text>
           </TouchableOpacity>
         </ScrollView>

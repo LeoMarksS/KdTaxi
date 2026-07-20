@@ -6,6 +6,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Alert,
   Platform,
   ScrollView,
   StyleSheet,
@@ -288,7 +289,12 @@ export default function ClientHome() {
             <TouchableOpacity onPress={() => router.push("/profile")}>
               <UserAvatar name={user?.name ?? "?"} photo={user?.photo} size={40} mode="client" />
             </TouchableOpacity>
-            <TouchableOpacity style={{ padding: 4 }} onPress={logout}>
+            <TouchableOpacity style={{ padding: 4 }} onPress={() => {
+              Alert.alert("Sair da conta", "Tem certeza que deseja sair?", [
+                { text: "Cancelar", style: "cancel" },
+                { text: "Sair", style: "destructive", onPress: logout },
+              ]);
+            }}>
               <Feather name="log-out" size={20} color={colors.mutedForeground} />
             </TouchableOpacity>
           </View>
