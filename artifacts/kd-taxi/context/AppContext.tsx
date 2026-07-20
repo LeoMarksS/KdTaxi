@@ -401,24 +401,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const me = userRef.current;
       if (!me) return;
       try {
+        const res = await authFetch(`/rides`);
+        if (!res.ok) return;
+        const all: Ride[] = await res.json();
+
         if (me.mode === "driver") {
-          const res = await authFetch(`/rides`);
-          if (res.ok) {
-            const all: Ride[] = await res.json();
-            setPendingRides(all.filter((r) => r.status === "waiting"));
+          // Restore waiting rides visible to all drivers
+          setPendingRides(all.filter((r) => r.status === "waiting"));
+          // Restore this driver's own in-progress rides so re-logging
+          // after a logout never loses contact with an active client.
+          const myActive = all.filter(
+            (r) => r.driverId === me.id &&
+              (r.status === "accepted" || r.status === "in_progress")
+          );
+          if (myActive.length > 0) {
+            setActiveRides((prev) => {
+              const existingIds = new Set(prev.map((r) => r.id));
+              const toAdd = myActive.filter((r) => !existingIds.has(r.id));
+              return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
+            });
           }
-        }
-        const current = activeRideRef.current;
-        if (current) {
-          const res = await authFetch(`/rides`);
-          if (res.ok) {
-            const all: Ride[] = await res.json();
-            const fresh = all.find((r) => r.id === current.id);
-            if (fresh) {
-              if (fresh.status === "finished" || fresh.status === "cancelled") {
+        } else if (me.mode === "client") {
+          // Server is the source of truth for the client's active ride.
+          // This covers both reconnects and re-logins after logout.
+          const myRide = all.find(
+            (r) => r.clientId === me.id &&
+              (r.status === "waiting" || r.status === "accepted" || r.status === "in_progress")
+          );
+          if (myRide) {
+            setActiveRide(myRide);
+          } else {
+            const current = activeRideRef.current;
+            if (current) {
+              const fresh = all.find((r) => r.id === current.id);
+              if (fresh && (fresh.status === "finished" || fresh.status === "cancelled")) {
                 setActiveRide(null);
-              } else {
-                setActiveRide(fresh);
               }
             }
           }
