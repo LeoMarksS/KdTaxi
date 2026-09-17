@@ -10,6 +10,7 @@ const colors = {
     cardForeground: "#FFFFFF",
 
     primary: "#F5C518",
+    primaryDeep: "#D9A800",
     primaryForeground: "#000000",
 
     secondary: "#222222",

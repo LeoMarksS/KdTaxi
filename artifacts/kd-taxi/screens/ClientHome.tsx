@@ -133,7 +133,7 @@ export default function ClientHome() {
   const vehicleAccent = vehicleType === "motorcycle" ? colors.statusInProgress : colors.primary;
   const vehicleGradient: [string, string] = vehicleType === "motorcycle"
     ? [colors.statusInProgress, colors.statusAccepted]
-    : [colors.primary, colors.statusWaiting];
+    : [colors.primary, colors.primaryDeep];
 
   const statusConfig = {
     waiting: { label: "Procurando motorista...", color: colors.statusWaiting, icon: "clock" as const },
@@ -453,11 +453,15 @@ export default function ClientHome() {
                   {(["pix", "dinheiro"] as const).map((p) => (
                     <TouchableOpacity
                       key={p}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: payment === p }}
                       style={[
                         s.payBtn,
                         {
-                          backgroundColor: payment === p ? colors.primary : colors.card,
-                          borderColor: payment === p ? colors.primary : colors.border,
+                          backgroundColor: payment === p
+                            ? (p === "pix" ? colors.statusInProgress : colors.statusAccepted)
+                            : (p === "pix" ? colors.statusInProgress : colors.statusAccepted) + "12",
+                          borderColor: p === "pix" ? colors.statusInProgress : colors.statusAccepted,
                         },
                       ]}
                       onPress={() => { setPayment(p); Haptics.selectionAsync(); }}
@@ -465,9 +469,11 @@ export default function ClientHome() {
                       <MaterialCommunityIcons
                         name={p === "pix" ? "qrcode" : "cash"}
                         size={18}
-                        color={payment === p ? "#000" : colors.mutedForeground}
+                        color={payment === p ? "#000" : (p === "pix" ? colors.statusInProgress : colors.statusAccepted)}
                       />
-                      <Text style={[s.payBtnText, { color: payment === p ? "#000" : colors.mutedForeground }]}>
+                      <Text style={[s.payBtnText, {
+                        color: payment === p ? "#000" : (p === "pix" ? colors.statusInProgress : colors.statusAccepted),
+                      }]}>
                         {p === "pix" ? "PIX" : "Dinheiro"}
                       </Text>
                     </TouchableOpacity>
