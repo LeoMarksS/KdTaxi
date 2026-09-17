@@ -26,6 +26,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useApp } from "@/context/AppContext";
+import type { VehicleType } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { UserAvatar } from "@/components/UserAvatar";
 import { RatingModal } from "@/components/RatingModal";
@@ -57,6 +58,7 @@ export default function ClientHome() {
   const [origin, setOrigin] = useState("");
   const [destination, setDestination] = useState("");
   const [payment, setPayment] = useState<"pix" | "dinheiro">("dinheiro");
+  const [vehicleType, setVehicleType] = useState<VehicleType>("car");
   const [loading, setLoading] = useState(false);
   const [priceResult, setPriceResult] = useState<{ price: number; isLocal: boolean } | null>(null);
   const [priceLookingUp, setPriceLookingUp] = useState(false);
@@ -113,7 +115,7 @@ export default function ClientHome() {
     if (!origin.trim() || !destination.trim()) return;
     setLoading(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    await requestRide(origin.trim(), destination.trim(), payment);
+    await requestRide(origin.trim(), destination.trim(), payment, vehicleType);
     setLoading(false);
   };
 
@@ -128,6 +130,10 @@ export default function ClientHome() {
   const totalSpent = myRides.reduce((sum, r) => sum + (r.price ?? 0), 0);
   const rating = user?.rating ?? 0;
   const rideCount = user?.rideCount ?? 0;
+  const vehicleAccent = vehicleType === "motorcycle" ? colors.statusInProgress : colors.primary;
+  const vehicleGradient: [string, string] = vehicleType === "motorcycle"
+    ? [colors.statusInProgress, colors.statusAccepted]
+    : [colors.primary, colors.statusWaiting];
 
   const statusConfig = {
     waiting: { label: "Procurando motorista...", color: colors.statusWaiting, icon: "clock" as const },
@@ -158,7 +164,7 @@ export default function ClientHome() {
     scroll: { flex: 1, paddingHorizontal: 24 },
     bigBtn: {
       borderRadius: 24, paddingVertical: 24, alignItems: "center", justifyContent: "center",
-      marginBottom: 20, shadowColor: colors.primary,
+      marginBottom: 20, shadowColor: vehicleAccent,
       shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.4, shadowRadius: 20, elevation: 12,
     },
     bigBtnIcon: { marginBottom: 8 },
@@ -186,6 +192,13 @@ export default function ClientHome() {
     priceLabel: { fontSize: 14, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
     priceValue: { fontSize: 18, fontWeight: "800", color: colors.statusAccepted, fontFamily: "Inter_700Bold" },
     paymentRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
+    vehicleRow: { flexDirection: "row", gap: 10, marginBottom: 16 },
+    vehicleBtn: {
+      flex: 1, paddingVertical: 12, paddingHorizontal: 10, borderRadius: 12,
+      alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8,
+      borderWidth: 2,
+    },
+    vehicleBtnText: { fontSize: 14, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
     payBtn: {
       flex: 1, paddingVertical: 12, borderRadius: 12,
       alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8,
@@ -348,12 +361,12 @@ export default function ClientHome() {
             <>
               <Animated.View style={pulseStyle}>
                 <LinearGradient
-                  colors={[colors.primary, "#E6A800"]}
+                  colors={vehicleGradient}
                   start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
                   style={s.bigBtn}
                 >
-                  <MaterialCommunityIcons name="car-side" size={48} color="#000" style={s.bigBtnIcon} />
-                  <Text style={s.bigBtnText}>KD TAXI</Text>
+                  <MaterialCommunityIcons name={vehicleType === "motorcycle" ? "motorbike" : "car-side"} size={48} color="#000" style={s.bigBtnIcon} />
+                  <Text style={s.bigBtnText}>{vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}</Text>
                   <Text style={s.bigBtnSub}>Preencha os campos abaixo</Text>
                 </LinearGradient>
               </Animated.View>
@@ -401,6 +414,40 @@ export default function ClientHome() {
                   </View>
                 )}
 
+                <Text style={[s.formTitle, { fontSize: 13, marginBottom: 10, marginTop: 4 }]}>Tipo de veículo</Text>
+                <View style={s.vehicleRow}>
+                  {([
+                    { type: "car", label: "KD CARRO", icon: "car" },
+                    { type: "motorcycle", label: "KD MOTO", icon: "motorbike" },
+                  ] as const).map((option) => {
+                    const selected = vehicleType === option.type;
+                    return (
+                      <TouchableOpacity
+                        key={option.type}
+                        style={[
+                          s.vehicleBtn,
+                          {
+                            backgroundColor: selected ? (option.type === "motorcycle" ? colors.statusInProgress : colors.primary) : colors.card,
+                            borderColor: selected ? (option.type === "motorcycle" ? colors.statusInProgress : colors.primary) : colors.border,
+                          },
+                        ]}
+                        onPress={() => { setVehicleType(option.type); Haptics.selectionAsync(); }}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected }}
+                      >
+                        <MaterialCommunityIcons
+                          name={option.icon}
+                          size={19}
+                          color={selected ? "#000" : colors.mutedForeground}
+                        />
+                        <Text style={[s.vehicleBtnText, { color: selected ? "#000" : colors.mutedForeground }]}>
+                          {option.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
                 <Text style={[s.formTitle, { fontSize: 13, marginBottom: 10, marginTop: 4 }]}>Forma de pagamento</Text>
                 <View style={s.paymentRow}>
                   {(["pix", "dinheiro"] as const).map((p) => (
@@ -428,7 +475,7 @@ export default function ClientHome() {
                 </View>
 
                 <TouchableOpacity
-                  style={[s.confirmBtn, { opacity: !origin.trim() || !destination.trim() ? 0.5 : 1 }]}
+                  style={[s.confirmBtn, { backgroundColor: vehicleAccent, opacity: !origin.trim() || !destination.trim() ? 0.5 : 1 }]}
                   onPress={handleRequest}
                   disabled={loading || !origin.trim() || !destination.trim()}
                 >
@@ -436,7 +483,7 @@ export default function ClientHome() {
                     <ActivityIndicator color="#000" size="small" />
                   ) : (
                     <>
-                      <MaterialCommunityIcons name="car" size={20} color="#000" />
+                      <MaterialCommunityIcons name={vehicleType === "motorcycle" ? "motorbike" : "car"} size={20} color="#000" />
                       <Text style={s.confirmBtnText}>Solicitar Corrida</Text>
                     </>
                   )}
@@ -471,6 +518,16 @@ export default function ClientHome() {
                         <View key={ride.id} style={s.historyCard}>
                           {ride.driverName && <Text style={s.historyDriver}>Motorista: {ride.driverName}</Text>}
                           <Text style={s.historyRoute}>{ride.origin} → {ride.destination}</Text>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 5 }}>
+                            <MaterialCommunityIcons
+                              name={ride.vehicleType === "motorcycle" ? "motorbike" : "car"}
+                              size={13}
+                              color={colors.primary}
+                            />
+                            <Text style={{ fontSize: 11, color: colors.primary, fontFamily: "Inter_600SemiBold" }}>
+                              {ride.vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}
+                            </Text>
+                          </View>
                           <View style={s.historyMeta}>
                             <Text style={s.historyDate}>
                               {new Date(ride.createdAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })}
@@ -511,6 +568,16 @@ export default function ClientHome() {
                 <View style={[s.inputDot, { backgroundColor: colors.statusInProgress }]} />
                 <Text style={s.rideDetailText}>{activeRide.destination}</Text>
               </View>
+               <View style={s.rideDetail}>
+                 <MaterialCommunityIcons
+                   name={activeRide.vehicleType === "motorcycle" ? "motorbike" : "car"}
+                   size={17}
+                    color={activeRide.vehicleType === "motorcycle" ? colors.statusInProgress : colors.primary}
+                 />
+                 <Text style={s.rideDetailText}>
+                   {activeRide.vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}
+                 </Text>
+               </View>
 
               {activeRide.price !== undefined && (
                 <View style={s.ridePriceBadge}>

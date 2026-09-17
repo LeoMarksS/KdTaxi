@@ -82,6 +82,12 @@ export default function RideDetailScreen() {
     routeLabel: { fontSize: 11, color: colors.mutedForeground, fontFamily: "Inter_500Medium", marginBottom: 2 },
     routeText: { fontSize: 16, fontWeight: "600", color: colors.foreground, fontFamily: "Inter_600SemiBold" },
     routeLine: { width: 2, height: 20, backgroundColor: colors.border, marginLeft: 5, marginTop: 2, marginBottom: 2 },
+    vehicleSection: {
+      flexDirection: "row", alignItems: "center", gap: 8,
+      backgroundColor: colors.primary + "18", borderRadius: 10,
+      paddingHorizontal: 12, paddingVertical: 9, marginTop: 4,
+    },
+    vehicleText: { fontSize: 13, color: colors.primary, fontFamily: "Inter_600SemiBold" },
     priceSection: {
       flexDirection: "row", alignItems: "center", justifyContent: "space-between",
       paddingHorizontal: 16, paddingVertical: 14,
@@ -204,6 +210,16 @@ export default function RideDetailScreen() {
                 <Text style={s.routeLabel}>Destino</Text>
                 <Text style={s.routeText}>{ride.destination}</Text>
               </View>
+            </View>
+            <View style={s.vehicleSection}>
+              <MaterialCommunityIcons
+                name={ride.vehicleType === "motorcycle" ? "motorbike" : "car"}
+                size={18}
+                color={colors.primary}
+              />
+              <Text style={s.vehicleText}>
+                Veículo solicitado: {ride.vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}
+              </Text>
             </View>
           </View>
           {ride.price !== undefined && (

@@ -19,12 +19,14 @@ export interface User {
   name: string;
   phone: string;
   mode: UserMode;
+  vehicleType?: VehicleType;
   photo?: string;
   rating?: number;
   rideCount?: number;
 }
 
 export type RideStatus = "waiting" | "accepted" | "in_progress" | "finished" | "cancelled";
+export type VehicleType = "car" | "motorcycle";
 
 export interface Ride {
   id: string;
@@ -41,6 +43,7 @@ export interface Ride {
   driverRideCount?: number;
   origin: string;
   destination: string;
+  vehicleType?: VehicleType;
   price?: number;
   payment?: "pix" | "dinheiro";
   status: RideStatus;
@@ -73,6 +76,8 @@ export interface AdminStats {
   totalClients: number;
   totalDrivers: number;
   onlineDrivers: number;
+  onlineCarDrivers: number;
+  onlineMotorcycleDrivers: number;
   totalRides: number;
   finishedRides: number;
   cancelledRides: number;
@@ -101,7 +106,7 @@ interface AppContextValue {
   markChatRead: (rideId: string) => void;
   fetchChatHistory: (rideId: string) => Promise<void>;
   socket: Socket | null;
-  requestRide: (origin: string, destination: string, payment: "pix" | "dinheiro") => Promise<Ride | null>;
+  requestRide: (origin: string, destination: string, payment: "pix" | "dinheiro", vehicleType?: VehicleType) => Promise<Ride | null>;
   acceptRide: (rideId: string) => Promise<void>;
   declineRide: (rideId: string) => void;
   finishRide: (rideId: string) => Promise<void>;
@@ -132,7 +137,14 @@ interface AppContextValue {
   // Auth
   token: string | null;
   login: (phone: string, password: string) => Promise<{ ok: boolean; error?: string }>;
-  register: (name: string, phone: string, password: string, mode: "client" | "driver", photo?: string) => Promise<{ ok: boolean; error?: string }>;
+  register: (
+    name: string,
+    phone: string,
+    password: string,
+    mode: "client" | "driver",
+    photo?: string,
+    vehicleType?: VehicleType,
+  ) => Promise<{ ok: boolean; error?: string }>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -195,6 +207,10 @@ async function playRideRequestSound() {
     );
     setTimeout(() => sound.unloadAsync().catch(() => {}), 5000);
   } catch {}
+}
+
+function matchesDriverVehicle(user: User, ride: Ride): boolean {
+  return (user.vehicleType ?? "car") === (ride.vehicleType ?? "car");
 }
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
@@ -303,7 +319,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       authFetch(`/rides`)
         .then((r) => (r.ok ? r.json() : []))
         .then((allRides: Ride[]) => {
-          const waiting = allRides.filter((r) => r.status === "waiting");
+          const currentUser = userRef.current;
+          const waiting = currentUser?.mode === "driver"
+            ? allRides.filter((r) => r.status === "waiting" && matchesDriverVehicle(currentUser, r))
+            : [];
           if (waiting.length === 0) return;
           setPendingRides((prev) => {
             const existingIds = new Set(prev.map((r) => r.id));
@@ -346,13 +365,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [setUser, setToken]);
 
   const register = useCallback(async (
-    name: string, phone: string, password: string, mode: "client" | "driver", photo?: string
+    name: string,
+    phone: string,
+    password: string,
+    mode: "client" | "driver",
+    photo?: string,
+    vehicleType?: VehicleType,
   ): Promise<{ ok: boolean; error?: string }> => {
     try {
       const res = await fetch(`${API_BASE}/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, phone, password, mode, photo }),
+        body: JSON.stringify({ name, phone, password, mode, photo, vehicleType }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return { ok: false, error: data.error ?? "Erro ao criar conta." };
@@ -407,7 +431,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         if (me.mode === "driver") {
           // Restore waiting rides visible to all drivers
-          setPendingRides(all.filter((r) => r.status === "waiting"));
+          setPendingRides(all.filter((r) => r.status === "waiting" && matchesDriverVehicle(me, r)));
           // Restore this driver's own in-progress rides so re-logging
           // after a logout never loses contact with an active client.
           const myActive = all.filter(
@@ -446,7 +470,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     socket.on("connect", reconcile);
 
     socket.on("nova_corrida", (ride: Ride) => {
-      if (userRef.current?.mode === "driver") {
+      const currentUser = userRef.current;
+      if (currentUser?.mode === "driver" && matchesDriverVehicle(currentUser, ride)) {
         setPendingRides((prev) => {
           const exists = prev.find((r) => r.id === ride.id);
           if (exists) return prev;
@@ -469,7 +494,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           Notifications.scheduleNotificationAsync({
             content: {
               title: "Nova corrida!",
-              body: `${ride.clientName}: ${ride.origin} → ${ride.destination}`,
+              body: `${ride.clientName}: ${ride.origin} → ${ride.destination} · ${ride.vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}`,
               sound: true,
             },
             trigger: null,
@@ -560,14 +585,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
   }, [user, token]);
 
-  const requestRide = useCallback(async (origin: string, destination: string, payment: "pix" | "dinheiro"): Promise<Ride | null> => {
+  const requestRide = useCallback(async (
+    origin: string,
+    destination: string,
+    payment: "pix" | "dinheiro",
+    vehicleType: VehicleType = "car",
+  ): Promise<Ride | null> => {
     if (!user) return null;
     const res = await authFetch(`/request-ride`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         clientId: user.id, clientName: user.name, clientPhone: user.phone,
-        clientPhoto: user.photo, origin, destination, payment,
+         clientPhoto: user.photo, origin, destination, payment, vehicleType,
       }),
     });
     if (!res.ok) return null;

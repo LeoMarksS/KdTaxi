@@ -261,6 +261,8 @@ export default function AdminHome() {
     clientName: { fontSize: 16, fontWeight: "700", color: colors.foreground, marginBottom: 8, fontFamily: "Inter_700Bold" },
     rideRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 },
     rideText: { fontSize: 13, color: colors.mutedForeground, flex: 1, fontFamily: "Inter_400Regular" },
+    vehicleInlineRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 },
+    vehicleInlineText: { fontSize: 12, color: colors.primary, fontFamily: "Inter_600SemiBold" },
     driverText: { fontSize: 13, color: colors.foreground, marginTop: 8, fontFamily: "Inter_500Medium" },
     priceInlineRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 6 },
     priceInlineText: { fontSize: 13, color: colors.statusAccepted, fontFamily: "Inter_600SemiBold" },
@@ -512,12 +514,23 @@ export default function AdminHome() {
             </View>
             <View style={s.statRow}>
               <StatCard
-                label="Online agora"
-                value={adminStats?.onlineDrivers ?? 0}
-                sub={adminStats?.onlineDrivers ? "🟢 ativos" : undefined}
-                color={adminStats?.onlineDrivers ? "#4CAF50" : colors.mutedForeground}
+                label="KD CARRO online"
+                value={adminStats?.onlineCarDrivers ?? 0}
+                sub={adminStats?.onlineCarDrivers ? "ativos" : undefined}
+                color={adminStats?.onlineCarDrivers ? colors.statusAccepted : colors.mutedForeground}
               />
-              <View style={{ flex: 3 }} />
+              <StatCard
+                label="KD MOTO online"
+                value={adminStats?.onlineMotorcycleDrivers ?? 0}
+                sub={adminStats?.onlineMotorcycleDrivers ? "ativos" : undefined}
+                color={adminStats?.onlineMotorcycleDrivers ? colors.statusInProgress : colors.mutedForeground}
+              />
+              <StatCard
+                label="Total online"
+                value={adminStats?.onlineDrivers ?? 0}
+                sub={adminStats?.onlineDrivers ? "ativos" : undefined}
+                color={adminStats?.onlineDrivers ? colors.statusAccepted : colors.mutedForeground}
+              />
             </View>
           </View>
 
@@ -703,6 +716,16 @@ export default function AdminHome() {
               <View style={s.rideRow}>
                 <Feather name="flag" size={13} color={colors.statusInProgress} />
                 <Text style={s.rideText}>{item.destination}</Text>
+              </View>
+              <View style={s.vehicleInlineRow}>
+                <MaterialCommunityIcons
+                  name={item.vehicleType === "motorcycle" ? "motorbike" : "car"}
+                  size={14}
+                  color={colors.primary}
+                />
+                <Text style={[s.vehicleInlineText, { color: item.vehicleType === "motorcycle" ? colors.statusInProgress : colors.primary }]}>
+                  {item.vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}
+                </Text>
               </View>
               {item.price !== undefined && (
                 <View style={s.priceInlineRow}>

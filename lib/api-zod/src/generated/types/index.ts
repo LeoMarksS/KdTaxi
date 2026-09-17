@@ -7,3 +7,9 @@
  */
 
 export * from "./healthStatus";
+export * from "./requestRide";
+export * from "./requestRidePayment";
+export * from "./ride";
+export * from "./ridePayment";
+export * from "./rideStatus";
+export * from "./vehicleType";

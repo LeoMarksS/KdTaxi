@@ -53,7 +53,13 @@ io.use((socket, next) => {
 });
 
 io.on("connection", (socket) => {
-  const user = socket.data.user as { id: string; mode: string; name: string; photo?: string };
+  const user = socket.data.user as {
+    id: string;
+    mode: string;
+    name: string;
+    photo?: string;
+    vehicleType?: "car" | "motorcycle";
+  };
   logger.info({ socketId: socket.id, userId: user.id, mode: user.mode }, "Socket connected");
 
   // Personal room: lets the server target this exact user across all of
@@ -62,6 +68,9 @@ io.on("connection", (socket) => {
   // Role room: lets driver-only broadcasts (e.g. new ride requests) reach
   // every driver without needing every handler to enumerate connected sockets.
   socket.join(`role:${user.mode}`);
+  if (user.mode === "driver") {
+    socket.join(`driver-vehicle:${user.vehicleType === "motorcycle" ? "motorcycle" : "car"}`);
+  }
 
   socket.on("mensagem_chat", (msg: Partial<ChatMessage>) => {
     const rideId = msg?.rideId;

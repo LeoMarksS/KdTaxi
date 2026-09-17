@@ -24,6 +24,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /request-ride:
+    post:
+      operationId: requestRide
+      tags: [rides]
+      summary: Request a ride
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestRide"
+      responses:
+        "200":
+          description: Ride requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ride"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +51,76 @@ components:
           type: string
       required:
         - status
+    VehicleType:
+      type: string
+      enum:
+        - car
+        - motorcycle
+    Ride:
+      type: object
+      properties:
+        id:
+          type: string
+        clientId:
+          type: string
+        clientName:
+          type: string
+        clientPhone:
+          type: string
+        clientPhoto:
+          type: string
+        origin:
+          type: string
+        destination:
+          type: string
+        vehicleType:
+          $ref: "#/components/schemas/VehicleType"
+        price:
+          type: number
+        payment:
+          type: string
+          enum: [pix, dinheiro]
+        status:
+          type: string
+          enum: [waiting, accepted, in_progress, finished, cancelled]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - clientId
+        - clientName
+        - clientPhone
+        - origin
+        - destination
+        - vehicleType
+        - status
+        - createdAt
+    RequestRide:
+      type: object
+      properties:
+        clientId:
+          type: string
+        clientName:
+          type: string
+        clientPhone:
+          type: string
+        clientPhoto:
+          type: string
+        origin:
+          type: string
+        destination:
+          type: string
+        vehicleType:
+          $ref: "#/components/schemas/VehicleType"
+        payment:
+          type: string
+          enum: [pix, dinheiro]
+      required:
+        - clientId
+        - clientName
+        - clientPhone
+        - origin
+        - destination
+        - vehicleType
 

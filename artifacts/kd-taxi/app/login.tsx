@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useApp } from "@/context/AppContext";
+import type { VehicleType } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { UserAvatar } from "@/components/UserAvatar";
 
@@ -35,10 +36,15 @@ export default function LoginScreen() {
   const [name, setName] = useState("");
   const [photo, setPhoto] = useState<string | undefined>();
   const [registerMode, setRegisterMode] = useState<RegisterMode>("client");
+  const [driverVehicleType, setDriverVehicleType] = useState<VehicleType>("car");
 
   const registerModes: { id: RegisterMode; label: string; icon: string; desc: string }[] = [
     { id: "client", label: "Cliente", icon: "account", desc: "Solicitar táxi" },
     { id: "driver", label: "Motorista", icon: "car", desc: "Aceitar corridas" },
+  ];
+  const driverVehicleOptions: { id: VehicleType; label: string; icon: string; desc: string }[] = [
+    { id: "car", label: "KD CARRO", icon: "car", desc: "Receber chamadas de carro" },
+    { id: "motorcycle", label: "KD MOTO", icon: "motorbike", desc: "Receber chamadas de moto" },
   ];
 
   const pickPhoto = async () => {
@@ -78,7 +84,14 @@ export default function LoginScreen() {
     if (password.length < 4) { setError("A senha deve ter ao menos 4 caracteres"); return; }
     setLoading(true);
     setError("");
-    const result = await register(name.trim(), phone.trim(), password, registerMode, photo);
+    const result = await register(
+      name.trim(),
+      phone.trim(),
+      password,
+      registerMode,
+      photo,
+      registerMode === "driver" ? driverVehicleType : undefined,
+    );
     setLoading(false);
     if (result.ok) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -139,6 +152,11 @@ export default function LoginScreen() {
     modeCard: { flex: 1, paddingVertical: 18, paddingHorizontal: 8, borderRadius: colors.radius, alignItems: "center", borderWidth: 2 },
     modeLabel: { fontSize: 13, marginTop: 8, fontFamily: "Inter_600SemiBold" },
     modeDesc: { fontSize: 11, marginTop: 2, fontFamily: "Inter_400Regular" },
+    vehicleSection: { marginBottom: 24 },
+    vehicleLabel: {
+      fontSize: 13, color: colors.mutedForeground, marginBottom: 10,
+      fontFamily: "Inter_500Medium", letterSpacing: 0.5, textTransform: "uppercase",
+    },
     btn: {
       borderRadius: colors.radius, paddingVertical: 18, alignItems: "center",
       justifyContent: "center", flexDirection: "row", gap: 8,
@@ -291,6 +309,41 @@ export default function LoginScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
+
+                {registerMode === "driver" && (
+                  <View style={s.vehicleSection}>
+                    <Text style={s.vehicleLabel}>Tipo de veículo</Text>
+                    <View style={s.modesRow}>
+                      {driverVehicleOptions.map((option) => {
+                        const selected = driverVehicleType === option.id;
+                        return (
+                          <TouchableOpacity
+                            key={option.id}
+                            style={[s.modeCard, {
+                              backgroundColor: selected ? colors.primary : colors.card,
+                              borderColor: selected ? colors.primary : colors.border,
+                            }]}
+                            onPress={() => { setDriverVehicleType(option.id); Haptics.selectionAsync(); }}
+                            accessibilityRole="radio"
+                            accessibilityState={{ selected }}
+                          >
+                            <MaterialCommunityIcons
+                              name={option.icon as any}
+                              size={30}
+                              color={selected ? "#000" : colors.mutedForeground}
+                            />
+                            <Text style={[s.modeLabel, { color: selected ? "#000" : colors.foreground }]}>
+                              {option.label}
+                            </Text>
+                            <Text style={[s.modeDesc, { color: selected ? "#00000099" : colors.mutedForeground }]}>
+                              {option.desc}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                )}
 
                 {!!error && <Text style={s.error}>{error}</Text>}
 

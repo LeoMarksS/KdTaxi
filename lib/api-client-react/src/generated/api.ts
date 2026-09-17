@@ -5,18 +5,21 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
+  MutationFunction,
   QueryFunction,
   QueryKey,
+  UseMutationOptions,
+  UseMutationResult,
   UseQueryOptions,
   UseQueryResult,
 } from "@tanstack/react-query";
 
-import type { HealthStatus } from "./api.schemas";
+import type { HealthStatus, RequestRide, Ride } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
-import type { ErrorType } from "../custom-fetch";
+import type { ErrorType, BodyType } from "../custom-fetch";
 
 type AwaitedInput<T> = PromiseLike<T> | T;
 
@@ -99,3 +102,89 @@ export function useHealthCheck<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Request a ride
+ */
+export const getRequestRideUrl = () => {
+  return `/api/request-ride`;
+};
+
+export const requestRide = async (
+  requestRide: RequestRide,
+  options?: RequestInit,
+): Promise<Ride> => {
+  return customFetch<Ride>(getRequestRideUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(requestRide),
+  });
+};
+
+export const getRequestRideMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestRide>>,
+    TError,
+    { data: BodyType<RequestRide> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof requestRide>>,
+  TError,
+  { data: BodyType<RequestRide> },
+  TContext
+> => {
+  const mutationKey = ["requestRide"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof requestRide>>,
+    { data: BodyType<RequestRide> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return requestRide(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RequestRideMutationResult = NonNullable<
+  Awaited<ReturnType<typeof requestRide>>
+>;
+export type RequestRideMutationBody = BodyType<RequestRide>;
+export type RequestRideMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Request a ride
+ */
+export const useRequestRide = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestRide>>,
+    TError,
+    { data: BodyType<RequestRide> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof requestRide>>,
+  TError,
+  { data: BodyType<RequestRide> },
+  TContext
+> => {
+  return useMutation(getRequestRideMutationOptions(options));
+};

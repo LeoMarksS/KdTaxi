@@ -69,6 +69,12 @@ export default function MyRidesScreen() {
     routeRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 },
     routeDot: { width: 8, height: 8, borderRadius: 4 },
     routeText: { fontSize: 14, color: colors.foreground, fontFamily: "Inter_400Regular", flex: 1 },
+    vehicleTag: {
+      flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start",
+      backgroundColor: colors.primary + "18", borderRadius: 8,
+      paddingHorizontal: 9, paddingVertical: 5, marginTop: 2,
+    },
+    vehicleText: { fontSize: 12, color: colors.primary, fontFamily: "Inter_600SemiBold" },
     metaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6 },
     metaDate: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
     priceTag: {
@@ -156,6 +162,16 @@ export default function MyRidesScreen() {
                   <View style={s.routeRow}>
                     <View style={[s.routeDot, { backgroundColor: colors.statusInProgress }]} />
                     <Text style={s.routeText} numberOfLines={1}>{ride.destination}</Text>
+                  </View>
+                  <View style={s.vehicleTag}>
+                    <MaterialCommunityIcons
+                      name={ride.vehicleType === "motorcycle" ? "motorbike" : "car"}
+                      size={14}
+                      color={colors.primary}
+                    />
+                    <Text style={[s.vehicleText, { color: ride.vehicleType === "motorcycle" ? colors.statusInProgress : colors.primary }]}>
+                      {ride.vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}
+                    </Text>
                   </View>
                   <View style={s.metaRow}>
                     <Text style={s.metaDate}>

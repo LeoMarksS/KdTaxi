@@ -12,6 +12,7 @@ interface User {
   phone: string;
   passwordHash: string;
   mode: "client" | "driver" | "admin";
+  vehicleType?: "car" | "motorcycle";
   active: boolean;
   photo?: string;
   pushToken?: string;
@@ -35,6 +36,7 @@ interface Ride {
   driverRideCount?: number;
   origin: string;
   destination: string;
+  vehicleType: "car" | "motorcycle";
   price?: number;
   payment?: "pix" | "dinheiro";
   status: "waiting" | "accepted" | "in_progress" | "finished" | "cancelled";
@@ -43,6 +45,14 @@ interface Ride {
   createdAt: string;
   acceptedAt?: string;
   finishedAt?: string;
+}
+
+function driverVehicleType(user: User): "car" | "motorcycle" {
+  return user.vehicleType === "motorcycle" ? "motorcycle" : "car";
+}
+
+function driverCanTakeRide(user: User, ride: Ride): boolean {
+  return user.mode === "driver" && driverVehicleType(user) === ride.vehicleType;
 }
 
 interface PriceRule {
@@ -232,8 +242,9 @@ function safeUserList(u: User) {
 
 // POST /register – create a new client or driver account
 router.post("/register", registerLimiter, (req: Request, res: Response) => {
-  const { name, phone, password, mode, photo } = req.body as {
+  const { name, phone, password, mode, photo, vehicleType } = req.body as {
     name?: string; phone?: string; password?: string; mode?: string; photo?: string;
+    vehicleType?: string;
   };
 
   if (!name?.trim() || !phone?.trim() || !password) {
@@ -248,6 +259,10 @@ router.post("/register", registerLimiter, (req: Request, res: Response) => {
     res.status(400).json({ error: "Tipo de conta inválido" });
     return;
   }
+  if (mode === "driver" && vehicleType !== undefined && vehicleType !== "car" && vehicleType !== "motorcycle") {
+    res.status(400).json({ error: "Tipo de veículo inválido" });
+    return;
+  }
 
   const normalizedPhone = phone.trim();
   const existing = Array.from(users.values()).find((u) => u.phone === normalizedPhone);
@@ -259,7 +274,9 @@ router.post("/register", registerLimiter, (req: Request, res: Response) => {
   const user: User = {
     id: getId(), name: name.trim(), phone: normalizedPhone,
     passwordHash: bcrypt.hashSync(password, 10),
-    mode, active: true, rating: 0, rideCount: 0,
+    mode,
+    vehicleType: mode === "driver" && vehicleType === "motorcycle" ? "motorcycle" : mode === "driver" ? "car" : undefined,
+    active: true, rating: 0, rideCount: 0,
     photo, createdAt: new Date().toISOString(),
   };
   users.set(user.id, user);
@@ -383,6 +400,8 @@ router.get("/admin/stats", requireAdmin, (_req: Request, res: Response) => {
     totalClients: allUserList.filter((u) => u.mode === "client").length,
     totalDrivers: allUserList.filter((u) => u.mode === "driver").length,
     onlineDrivers: allUserList.filter((u) => u.mode === "driver" && u.active).length,
+    onlineCarDrivers: allUserList.filter((u) => u.mode === "driver" && u.active && driverVehicleType(u) === "car").length,
+    onlineMotorcycleDrivers: allUserList.filter((u) => u.mode === "driver" && u.active && driverVehicleType(u) === "motorcycle").length,
     totalRides: allRideList.length,
     finishedRides: finishedRides.length,
     cancelledRides: allRideList.filter((r) => r.status === "cancelled").length,
@@ -418,11 +437,15 @@ router.post("/admin/users", requireAdmin, (req: Request, res: Response) => {
 
 // POST /request-ride
 router.post("/request-ride", requireAuth, async (req: Request, res: Response) => {
-  const { clientId, clientName, clientPhone, clientPhoto, origin, destination, payment } = req.body as {
+  const { clientId, clientName, clientPhone, clientPhoto, origin, destination, payment, vehicleType } = req.body as {
     clientId: string; clientName: string; clientPhone: string; clientPhoto?: string;
-    origin: string; destination: string; payment?: string;
+    origin: string; destination: string; payment?: string; vehicleType?: string;
   };
   if (!clientId || !origin || !destination) { res.status(400).json({ error: "Missing required fields" }); return; }
+  if (vehicleType !== undefined && vehicleType !== "car" && vehicleType !== "motorcycle") {
+    res.status(400).json({ error: "Tipo de veículo inválido" });
+    return;
+  }
   if (req.authUser!.id !== clientId || req.authUser!.mode !== "client") {
     res.status(403).json({ error: "Acesso negado" });
     return;
@@ -436,17 +459,23 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
     clientAvgRating: client?.rating ?? 0,
     clientRideCount: client?.rideCount ?? 0,
     origin, destination,
+    vehicleType: vehicleType === "motorcycle" ? "motorcycle" : "car",
     price, payment: (payment as Ride["payment"]) ?? "dinheiro",
     status: "waiting", createdAt: new Date().toISOString(),
   };
   rides.set(ride.id, ride);
 
   const io = req.app.get("io");
-  if (io) io.emit("nova_corrida", ride);
+  if (io) io.to(`driver-vehicle:${ride.vehicleType}`).emit("nova_corrida", ride);
 
   for (const u of users.values()) {
-    if (u.mode === "driver" && u.active && u.pushToken) {
-      sendPushNotification(u.pushToken, "Nova corrida!", `${clientName}: ${origin} → ${destination}`, { rideId: ride.id });
+    if (u.mode === "driver" && u.active && u.pushToken && driverCanTakeRide(u, ride)) {
+      sendPushNotification(
+        u.pushToken,
+        "Nova corrida!",
+        `${clientName}: ${origin} → ${destination} · ${ride.vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}`,
+        { rideId: ride.id },
+      );
     }
   }
 
@@ -467,6 +496,10 @@ router.post("/accept-ride", requireAuth, async (req: Request, res: Response) => 
   if (ride.status !== "waiting") { res.status(409).json({ error: "Ride already taken" }); return; }
 
   const driver = users.get(driverId);
+  if (!driver || !driverCanTakeRide(driver, ride)) {
+    res.status(403).json({ error: "Esta corrida é de outra categoria de veículo" });
+    return;
+  }
   ride.driverId = driverId;
   ride.driverName = driverName;
   ride.driverPhoto = driverPhoto;
@@ -558,9 +591,15 @@ router.post("/rides/:id/rate", requireAuth, (req: Request, res: Response) => {
   res.json(ride);
 });
 
-// GET /rides – any authenticated user (drivers need this to see waiting rides)
-router.get("/rides", requireAuth, (_req: Request, res: Response) => {
-  res.json(Array.from(rides.values()).sort(
+// GET /rides – drivers only receive matching waiting rides; admins and clients keep their full view
+router.get("/rides", requireAuth, (req: Request, res: Response) => {
+  const visibleRides = req.authUser!.mode === "driver"
+    ? Array.from(rides.values()).filter((ride) =>
+      ride.driverId === req.authUser!.id ||
+      (ride.status === "waiting" && driverCanTakeRide(req.authUser!, ride))
+    )
+    : Array.from(rides.values());
+  res.json(visibleRides.sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   ));
 });

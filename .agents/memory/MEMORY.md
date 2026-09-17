@@ -1,2 +1,3 @@
 - [KD TAXI auth model](kd-taxi-auth.md) — login identifies role from stored account (phone+password), never a client-selected mode; all routes need bearer auth.
 - [KD TAXI real-time reliability](kd-taxi-realtime.md) — socket auth via bearer token + per-user rooms + chat persistence + reconnect reconciliation, not global broadcast.
+- [KD TAXI vehicle matching](kd-taxi-vehicle-matching.md) — vehicle category is server-authoritative; legacy drivers without a type remain KD CARRO.

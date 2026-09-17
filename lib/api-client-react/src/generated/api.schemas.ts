@@ -8,3 +8,61 @@
 export interface HealthStatus {
   status: string;
 }
+
+export type VehicleType = (typeof VehicleType)[keyof typeof VehicleType];
+
+export const VehicleType = {
+  car: "car",
+  motorcycle: "motorcycle",
+} as const;
+
+export type RidePayment = (typeof RidePayment)[keyof typeof RidePayment];
+
+export const RidePayment = {
+  pix: "pix",
+  dinheiro: "dinheiro",
+} as const;
+
+export type RideStatus = (typeof RideStatus)[keyof typeof RideStatus];
+
+export const RideStatus = {
+  waiting: "waiting",
+  accepted: "accepted",
+  in_progress: "in_progress",
+  finished: "finished",
+  cancelled: "cancelled",
+} as const;
+
+export interface Ride {
+  id: string;
+  clientId: string;
+  clientName: string;
+  clientPhone: string;
+  clientPhoto?: string;
+  origin: string;
+  destination: string;
+  vehicleType: VehicleType;
+  price?: number;
+  payment?: RidePayment;
+  status: RideStatus;
+  createdAt: string;
+}
+
+export type RequestRidePayment =
+  (typeof RequestRidePayment)[keyof typeof RequestRidePayment];
+
+export const RequestRidePayment = {
+  pix: "pix",
+  dinheiro: "dinheiro",
+} as const;
+
+export interface RequestRide {
+  clientId: string;
+  clientName: string;
+  clientPhone: string;
+  clientPhoto?: string;
+  origin: string;
+  destination: string;
+  vehicleType: VehicleType;
+  payment?: RequestRidePayment;
+}

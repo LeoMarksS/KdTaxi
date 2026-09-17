@@ -14,3 +14,38 @@ import * as zod from "zod";
 export const HealthCheckResponse = zod.object({
   status: zod.string(),
 });
+
+/**
+ * @summary Request a ride
+ */
+export const RequestRideBody = zod.object({
+  clientId: zod.string(),
+  clientName: zod.string(),
+  clientPhone: zod.string(),
+  clientPhoto: zod.string().optional(),
+  origin: zod.string(),
+  destination: zod.string(),
+  vehicleType: zod.enum(["car", "motorcycle"]),
+  payment: zod.enum(["pix", "dinheiro"]).optional(),
+});
+
+export const RequestRideResponse = zod.object({
+  id: zod.string(),
+  clientId: zod.string(),
+  clientName: zod.string(),
+  clientPhone: zod.string(),
+  clientPhoto: zod.string().optional(),
+  origin: zod.string(),
+  destination: zod.string(),
+  vehicleType: zod.enum(["car", "motorcycle"]),
+  price: zod.number().optional(),
+  payment: zod.enum(["pix", "dinheiro"]).optional(),
+  status: zod.enum([
+    "waiting",
+    "accepted",
+    "in_progress",
+    "finished",
+    "cancelled",
+  ]),
+  createdAt: zod.coerce.date(),
+});

@@ -66,6 +66,12 @@ function RideCard({ ride, onAccept, onDecline, compact }: {
     row: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6 },
     dot: { width: 8, height: 8, borderRadius: 4 },
     routeText: { fontSize: compact ? 13 : 18, color: colors.foreground, flex: 1, fontFamily: "Inter_600SemiBold" },
+    vehicleRow: {
+      flexDirection: "row", alignItems: "center", gap: 7, alignSelf: "flex-start",
+      backgroundColor: colors.primary + "18", borderRadius: 8,
+      paddingHorizontal: 10, paddingVertical: 6, marginTop: 4,
+    },
+    vehicleText: { fontSize: 12, color: colors.primary, fontFamily: "Inter_600SemiBold" },
     priceRow: {
       flexDirection: "row", alignItems: "center", gap: 8,
       backgroundColor: colors.statusAccepted + "15", borderRadius: 10,
@@ -119,6 +125,16 @@ function RideCard({ ride, onAccept, onDecline, compact }: {
         <View style={s.row}>
           <View style={[s.dot, { backgroundColor: colors.statusInProgress }]} />
           <Text style={s.routeText}>{ride.destination}</Text>
+        </View>
+        <View style={s.vehicleRow}>
+          <MaterialCommunityIcons
+            name={ride.vehicleType === "motorcycle" ? "motorbike" : "car"}
+            size={15}
+            color={colors.primary}
+          />
+          <Text style={[s.vehicleText, { color: ride.vehicleType === "motorcycle" ? colors.statusInProgress : colors.primary }]}>
+            {ride.vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}
+          </Text>
         </View>
         {ride.price !== undefined && (
           <View style={s.priceRow}>
@@ -263,6 +279,12 @@ export default function DriverHome() {
     row: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
     dot: { width: 8, height: 8, borderRadius: 4 },
     routeText: { fontSize: 15, color: colors.foreground, flex: 1, fontFamily: "Inter_400Regular" },
+    vehicleRow: {
+      flexDirection: "row", alignItems: "center", gap: 7, alignSelf: "flex-start",
+      backgroundColor: colors.primary + "18", borderRadius: 8,
+      paddingHorizontal: 10, paddingVertical: 6, marginTop: 4,
+    },
+    vehicleText: { fontSize: 12, color: colors.primary, fontFamily: "Inter_600SemiBold" },
     priceRow: {
       flexDirection: "row", alignItems: "center", gap: 8,
       backgroundColor: colors.statusAccepted + "15", borderRadius: 10,
@@ -378,6 +400,16 @@ export default function DriverHome() {
                 <View style={s.row}>
                   <View style={[s.dot, { backgroundColor: colors.statusInProgress }]} />
                   <Text style={s.routeText}>{ride.destination}</Text>
+                </View>
+                <View style={s.vehicleRow}>
+                  <MaterialCommunityIcons
+                    name={ride.vehicleType === "motorcycle" ? "motorbike" : "car"}
+                    size={15}
+                    color={colors.primary}
+                  />
+                  <Text style={[s.vehicleText, { color: ride.vehicleType === "motorcycle" ? colors.statusInProgress : colors.primary }]}>
+                    {ride.vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}
+                  </Text>
                 </View>
                 {ride.price !== undefined && (
                   <View style={s.priceRow}>
