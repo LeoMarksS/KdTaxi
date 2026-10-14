@@ -9,6 +9,8 @@ On Android Expo Go, do not import or initialize `expo-notifications`: remote pus
 
 **How to apply:** Detect Android's Expo Go runtime before dynamically importing the notification module. Test Android remote push in a development build, not Expo Go.
 
+The guarded startup path was confirmed on the user's Android device: KD TAXI opened normally in Expo Go after aligning the project to SDK 57.
+
 For Expo SDK updates, preserve the workspace's 24-hour minimum package age. Expo's compatibility checker can recommend patch releases that pnpm still blocks because they are too new; do not weaken the age guard or add temporary exemptions just to make the checker pass.
 
 **Why:** The workspace uses the delay as a supply-chain safety control; the Expo SDK patch train can publish faster than that window.
