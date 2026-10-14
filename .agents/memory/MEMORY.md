@@ -1,3 +1,4 @@
 - [KD TAXI auth model](kd-taxi-auth.md) — login identifies role from stored account (phone+password), never a client-selected mode; all routes need bearer auth.
 - [KD TAXI real-time reliability](kd-taxi-realtime.md) — socket auth via bearer token + per-user rooms + chat persistence + reconnect reconciliation, not global broadcast.
 - [KD TAXI vehicle matching](kd-taxi-vehicle-matching.md) — vehicle category is server-authoritative; legacy drivers without a type remain KD CARRO.
+- [KD TAXI Expo Go support](kd-taxi-expo-go.md) — Android Expo Go must skip notification-module loading; remote push requires a development build and SDK patches respect the 24-hour install guard.

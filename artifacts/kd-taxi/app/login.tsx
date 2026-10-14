@@ -1,7 +1,7 @@
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
-import { LinearGradient } from "expo-linear-gradient";
+import { LinearGradient } from "@/components/CompatLinearGradient";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {

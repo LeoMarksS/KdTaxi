@@ -7,12 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "kd-taxi",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/images/icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0D0D0D"
-    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.kdtaxi.app",
@@ -28,7 +22,13 @@
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#0D0D0D"
       },
-      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE", "RECEIVE_BOOT_COMPLETED", "VIBRATE"]
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE"
+      ]
     },
     "web": {
       "favicon": "./assets/images/icon.png",
@@ -45,6 +45,14 @@
           "origin": "https://replit.com/"
         }
       ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#0D0D0D"
+        }
+      ],
       "expo-font",
       "expo-web-browser",
       [
@@ -59,7 +67,16 @@
         "expo-image-picker",
         {
           "photosPermission": "Permitir acesso às fotos para foto do perfil.",
-          "cameraPermission": "Permitir acesso à câmera para foto do perfil."
+          "cameraPermission": "Permitir acesso à câmera para foto do perfil.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false
         }
       ]
     ],

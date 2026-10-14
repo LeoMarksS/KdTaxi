@@ -1,6 +1,6 @@
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { LinearGradient } from "expo-linear-gradient";
+import { LinearGradient } from "@/components/CompatLinearGradient";
 import { router } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {

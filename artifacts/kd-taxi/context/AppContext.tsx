@@ -1,6 +1,4 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Notifications from "expo-notifications";
-import { Audio } from "expo-av";
 import { Platform } from "react-native";
 import React, {
   createContext,
@@ -11,6 +9,8 @@ import React, {
   useState,
 } from "react";
 import { io, Socket } from "socket.io-client";
+
+import { registerForPushNotifications, scheduleLocalNotification } from "@/lib/notifications";
 
 export type UserMode = "client" | "driver" | "admin" | null;
 
@@ -150,32 +150,6 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 export const API_BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
-
-async function registerForPushNotifications(): Promise<string | null> {
-  if (Platform.OS === "web") return null;
-  try {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-    if (existingStatus !== "granted") {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-    if (finalStatus !== "granted") return null;
-    const token = await Notifications.getExpoPushTokenAsync();
-    return token.data;
-  } catch {
-    return null;
-  }
-}
-
 // Play a beep sound to alert driver of incoming ride
 async function playRideRequestSound() {
   if (Platform.OS === "web") {
@@ -200,12 +174,12 @@ async function playRideRequestSound() {
     return;
   }
   try {
-    await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
-    const { sound } = await Audio.Sound.createAsync(
-      { uri: "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" },
-      { shouldPlay: true, volume: 1.0 }
-    );
-    setTimeout(() => sound.unloadAsync().catch(() => {}), 5000);
+    const { createAudioPlayer, setAudioModeAsync } = await import("expo-audio");
+    await setAudioModeAsync({ playsInSilentMode: true });
+    const player = createAudioPlayer("https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3");
+    player.volume = 1;
+    player.play();
+    setTimeout(() => player.remove(), 5000);
   } catch {}
 }
 
@@ -491,14 +465,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             }
           };
           schedulePlay();
-          Notifications.scheduleNotificationAsync({
-            content: {
-              title: "Nova corrida!",
-              body: `${ride.clientName}: ${ride.origin} → ${ride.destination} · ${ride.vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}`,
-              sound: true,
-            },
-            trigger: null,
-          }).catch(() => {});
+          scheduleLocalNotification(
+            "Nova corrida!",
+            `${ride.clientName}: ${ride.origin} → ${ride.destination} · ${ride.vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}`,
+          );
         }
       }
     });
@@ -515,10 +485,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } else if (me?.id === ride.clientId) {
         // Client whose ride was accepted: set their single active ride.
         setActiveRide(ride);
-        Notifications.scheduleNotificationAsync({
-          content: { title: "Motorista encontrado!", body: `${ride.driverName} está a caminho`, sound: true },
-          trigger: null,
-        }).catch(() => {});
+        scheduleLocalNotification("Motorista encontrado!", `${ride.driverName} está a caminho`);
       }
       // All drivers: remove from pending list regardless of who accepted
       if (me?.mode === "driver") {
@@ -532,18 +499,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setActiveRides((prev) => prev.filter((r) => r.id !== ride.id));
         setMyRides((prev) => [ride, ...prev.filter((r) => r.id !== ride.id)]);
         setFinishedRideToRate(ride);
-        Notifications.scheduleNotificationAsync({
-          content: { title: "Corrida finalizada!", body: "Avalie sua experiência", sound: true },
-          trigger: null,
-        }).catch(() => {});
+        scheduleLocalNotification("Corrida finalizada!", "Avalie sua experiência");
       } else if (me?.id === ride.clientId) {
         setActiveRide(null);
         setFinishedRideToRate(ride);
         setMyRides((prev) => [ride, ...prev.filter((r) => r.id !== ride.id)]);
-        Notifications.scheduleNotificationAsync({
-          content: { title: "Corrida finalizada!", body: "Avalie sua experiência", sound: true },
-          trigger: null,
-        }).catch(() => {});
+        scheduleLocalNotification("Corrida finalizada!", "Avalie sua experiência");
       }
     });
 
@@ -567,10 +528,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         // Only increment and notify when the relevant chat screen is not open
         if (isChatOpenRef.current !== msg.rideId) {
           setUnreadByRide((prev) => ({ ...prev, [msg.rideId]: (prev[msg.rideId] ?? 0) + 1 }));
-          Notifications.scheduleNotificationAsync({
-            content: { title: `Mensagem de ${msg.senderName}`, body: msg.text, sound: true },
-            trigger: null,
-          }).catch(() => {});
+          scheduleLocalNotification(`Mensagem de ${msg.senderName}`, msg.text);
         }
       }
     });
