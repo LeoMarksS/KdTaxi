@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { RidePayment } from "./ridePayment";
+import type { PaymentMethod } from "./paymentMethod";
 import type { RideStatus } from "./rideStatus";
 import type { VehicleType } from "./vehicleType";
 
@@ -14,12 +14,36 @@ export interface Ride {
   clientId: string;
   clientName: string;
   clientPhone: string;
-  clientPhoto?: string;
+  /** @nullable */
+  clientPhoto?: string | null;
+  /** @nullable */
+  clientAvgRating?: number | null;
+  /** @nullable */
+  clientRideCount?: number | null;
+  /** @nullable */
+  driverId?: string | null;
+  /** @nullable */
+  driverName?: string | null;
+  /** @nullable */
+  driverPhoto?: string | null;
+  /** @nullable */
+  driverAvgRating?: number | null;
+  /** @nullable */
+  driverRideCount?: number | null;
   origin: string;
   destination: string;
   vehicleType: VehicleType;
-  price?: number;
-  payment?: RidePayment;
+  /** @nullable */
+  price?: number | null;
+  payment?: PaymentMethod | null;
   status: RideStatus;
+  /** @nullable */
+  clientRating?: number | null;
+  /** @nullable */
+  driverRating?: number | null;
   createdAt: Date;
+  /** @nullable */
+  acceptedAt?: Date | null;
+  /** @nullable */
+  finishedAt?: Date | null;
 }

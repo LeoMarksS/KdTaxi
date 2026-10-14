@@ -236,7 +236,7 @@ function safeUser(u: User) {
 }
 
 function safeUserList(u: User) {
-  const { passwordHash: _ph, ...rest } = u;
+  const { passwordHash: _ph, pushToken: _pushToken, ...rest } = u;
   return rest;
 }
 
@@ -323,7 +323,7 @@ router.put("/users/:id", requireAuth, (req: Request, res: Response) => {
   res.json(safeUser(user));
 });
 
-// GET /users – admin only, list of clients/drivers (no photos, for perf)
+// GET /users – admin only, list of clients/drivers without passwords or push tokens
 router.get("/users", requireAdmin, (_req: Request, res: Response) => {
   res.json(Array.from(users.values())
     .filter((u) => u.mode !== "admin")
@@ -356,12 +356,25 @@ router.post("/users/:id/active", requireAuth, (req: Request, res: Response) => {
 router.put("/admin/users/:id", requireAdmin, (req: Request, res: Response) => {
   const user = users.get((req.params.id as string));
   if (!user) { res.status(404).json({ error: "Not found" }); return; }
-  const { name, phone, mode, active, password } = req.body as {
-    name?: string; phone?: string; mode?: string; active?: boolean; password?: string;
+  const { name, phone, mode, vehicleType, active, password } = req.body as {
+    name?: string; phone?: string; mode?: string; vehicleType?: string; active?: boolean; password?: string;
   };
+  if (mode !== undefined && mode !== "client" && mode !== "driver" && mode !== "admin") {
+    res.status(400).json({ error: "Tipo de conta inválido" });
+    return;
+  }
+  if (vehicleType !== undefined && vehicleType !== "car" && vehicleType !== "motorcycle") {
+    res.status(400).json({ error: "Tipo de veículo inválido" });
+    return;
+  }
+  if (vehicleType !== undefined && (mode ?? user.mode) !== "driver") {
+    res.status(400).json({ error: "O tipo de veículo só pode ser definido para motoristas" });
+    return;
+  }
   if (name !== undefined) user.name = name.trim();
   if (phone !== undefined) user.phone = phone.trim();
   if (mode !== undefined) user.mode = mode as User["mode"];
+  if (vehicleType !== undefined) user.vehicleType = vehicleType as User["vehicleType"];
   if (active !== undefined) user.active = active;
   if (password !== undefined && password.length >= 4) user.passwordHash = bcrypt.hashSync(password, 10);
   res.json(safeUser(user));
@@ -414,19 +427,35 @@ router.get("/admin/stats", requireAdmin, (_req: Request, res: Response) => {
   });
 });
 
-// POST /admin/users – create a new admin account
+// POST /admin/users – create a client, driver, or admin account
 router.post("/admin/users", requireAdmin, (req: Request, res: Response) => {
-  const { name, phone, password, mode } = req.body as {
-    name: string; phone: string; password: string; mode?: string;
+  const { name, phone, password, mode, vehicleType } = req.body as {
+    name: string; phone: string; password: string; mode?: string; vehicleType?: string;
   };
-  if (!name || !phone || !password) { res.status(400).json({ error: "Missing fields" }); return; }
+  if (!name?.trim() || !phone?.trim() || !password) { res.status(400).json({ error: "Missing fields" }); return; }
   if (password.length < 4) { res.status(400).json({ error: "A senha deve ter ao menos 4 caracteres" }); return; }
-  const existing = Array.from(users.values()).find((u) => u.phone === phone);
+  if (mode !== undefined && mode !== "client" && mode !== "driver" && mode !== "admin") {
+    res.status(400).json({ error: "Tipo de conta inválido" });
+    return;
+  }
+  if (vehicleType !== undefined && vehicleType !== "car" && vehicleType !== "motorcycle") {
+    res.status(400).json({ error: "Tipo de veículo inválido" });
+    return;
+  }
+  if (vehicleType !== undefined && mode !== "driver") {
+    res.status(400).json({ error: "O tipo de veículo só pode ser definido para motoristas" });
+    return;
+  }
+  const normalizedPhone = phone.trim();
+  const existing = Array.from(users.values()).find((u) => u.phone === normalizedPhone);
   if (existing) { res.status(409).json({ error: "Telefone já cadastrado" }); return; }
+  const resolvedMode = (mode as User["mode"]) ?? "admin";
   const user: User = {
-    id: getId(), name: name.trim(), phone: phone.trim(),
+    id: getId(), name: name.trim(), phone: normalizedPhone,
     passwordHash: bcrypt.hashSync(password, 10),
-    mode: (mode as User["mode"]) ?? "admin", active: true, rating: 0, rideCount: 0,
+    mode: resolvedMode,
+    ...(resolvedMode === "driver" ? { vehicleType: (vehicleType as User["vehicleType"]) ?? "car" } : {}),
+    active: resolvedMode !== "driver", rating: 0, rideCount: 0,
     createdAt: new Date().toISOString(),
   };
   users.set(user.id, user);

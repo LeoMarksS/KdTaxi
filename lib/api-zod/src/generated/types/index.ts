@@ -6,10 +6,20 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from "./adminStats";
+export * from "./adminUserInput";
+export * from "./adminUserUpdate";
 export * from "./healthStatus";
+export * from "./loginInput";
+export * from "./loginResponse";
+export * from "./okResult";
+export * from "./paymentMethod";
+export * from "./priceRule";
+export * from "./pricingInput";
 export * from "./requestRide";
 export * from "./requestRidePayment";
 export * from "./ride";
-export * from "./ridePayment";
 export * from "./rideStatus";
+export * from "./user";
+export * from "./userMode";
 export * from "./vehicleType";

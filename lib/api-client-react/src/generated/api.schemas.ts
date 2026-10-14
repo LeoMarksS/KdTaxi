@@ -16,9 +16,17 @@ export const VehicleType = {
   motorcycle: "motorcycle",
 } as const;
 
-export type RidePayment = (typeof RidePayment)[keyof typeof RidePayment];
+export type UserMode = (typeof UserMode)[keyof typeof UserMode];
 
-export const RidePayment = {
+export const UserMode = {
+  client: "client",
+  driver: "driver",
+  admin: "admin",
+} as const;
+
+export type PaymentMethod = (typeof PaymentMethod)[keyof typeof PaymentMethod];
+
+export const PaymentMethod = {
   pix: "pix",
   dinheiro: "dinheiro",
 } as const;
@@ -33,19 +41,123 @@ export const RideStatus = {
   cancelled: "cancelled",
 } as const;
 
+export interface User {
+  id: string;
+  name: string;
+  phone: string;
+  mode: UserMode;
+  vehicleType?: VehicleType | null;
+  active: boolean;
+  /** @nullable */
+  photo?: string | null;
+  rating: number;
+  rideCount: number;
+  createdAt: string;
+}
+
+export interface LoginInput {
+  phone: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  user: User;
+  token: string;
+}
+
+export interface OkResult {
+  ok: boolean;
+}
+
+export interface AdminStats {
+  totalUsers: number;
+  totalClients: number;
+  totalDrivers: number;
+  onlineDrivers: number;
+  onlineCarDrivers: number;
+  onlineMotorcycleDrivers: number;
+  totalRides: number;
+  finishedRides: number;
+  cancelledRides: number;
+  activeRides: number;
+  totalRevenue: number;
+  todayRides: number;
+  todayRevenue: number;
+  avgRating: number;
+}
+
+export interface AdminUserInput {
+  /** @minLength 1 */
+  name: string;
+  /** @minLength 1 */
+  phone: string;
+  /** @minLength 4 */
+  password: string;
+  mode?: UserMode;
+}
+
+export interface AdminUserUpdate {
+  name?: string;
+  phone?: string;
+  /** @minLength 4 */
+  password?: string;
+  mode?: UserMode;
+  active?: boolean;
+}
+
+export interface PriceRule {
+  id: string;
+  destination: string;
+  price: number;
+  isLocal?: boolean;
+  createdAt: string;
+}
+
+export interface PricingInput {
+  /** @minLength 1 */
+  destination: string;
+  /** @minimum 0 */
+  price: number;
+  isLocal?: boolean;
+}
+
 export interface Ride {
   id: string;
   clientId: string;
   clientName: string;
   clientPhone: string;
-  clientPhoto?: string;
+  /** @nullable */
+  clientPhoto?: string | null;
+  /** @nullable */
+  clientAvgRating?: number | null;
+  /** @nullable */
+  clientRideCount?: number | null;
+  /** @nullable */
+  driverId?: string | null;
+  /** @nullable */
+  driverName?: string | null;
+  /** @nullable */
+  driverPhoto?: string | null;
+  /** @nullable */
+  driverAvgRating?: number | null;
+  /** @nullable */
+  driverRideCount?: number | null;
   origin: string;
   destination: string;
   vehicleType: VehicleType;
-  price?: number;
-  payment?: RidePayment;
+  /** @nullable */
+  price?: number | null;
+  payment?: PaymentMethod | null;
   status: RideStatus;
+  /** @nullable */
+  clientRating?: number | null;
+  /** @nullable */
+  driverRating?: number | null;
   createdAt: string;
+  /** @nullable */
+  acceptedAt?: string | null;
+  /** @nullable */
+  finishedAt?: string | null;
 }
 
 export type RequestRidePayment =

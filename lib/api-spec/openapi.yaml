@@ -10,6 +10,16 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication operations
+  - name: admin
+    description: Administrative operations
+  - name: users
+    description: User management
+  - name: rides
+    description: Ride operations
+  - name: pricing
+    description: Pricing operations
 paths:
   /healthz:
     get:
@@ -29,6 +39,8 @@ paths:
       operationId: requestRide
       tags: [rides]
       summary: Request a ride
+      security:
+        - bearerAuth: []
       requestBody:
         required: true
         content:
@@ -42,7 +54,229 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ride"
+  /login:
+    post:
+      operationId: loginUser
+      tags: [auth]
+      summary: Sign in with phone and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Authenticated account and session token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: Invalid phone or password
+  /logout:
+    post:
+      operationId: logoutUser
+      tags: [auth]
+      summary: Sign out the current session
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Session ended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResult"
+  /admin/stats:
+    get:
+      operationId: getAdminStats
+      tags: [admin]
+      summary: Read operational statistics
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Current system statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStats"
+        "403":
+          description: Admin account required
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: List client and driver accounts for administration
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Users without password or push-token fields
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+        "403":
+          description: Admin account required
+  /rides:
+    get:
+      operationId: listRides
+      tags: [rides]
+      summary: List rides visible to the authenticated account
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Rides ordered newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Ride"
+  /admin/users:
+    post:
+      operationId: createAdminUser
+      tags: [admin, users]
+      summary: Create a user account
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUserInput"
+      responses:
+        "200":
+          description: Created account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "403":
+          description: Admin account required
+  /admin/users/{id}:
+    put:
+      operationId: updateAdminUser
+      tags: [admin, users]
+      summary: Update a user account
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminUserUpdate"
+      responses:
+        "200":
+          description: Updated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "403":
+          description: Admin account required
+        "404":
+          description: User not found
+    delete:
+      operationId: deleteAdminUser
+      tags: [admin, users]
+      summary: Delete a non-admin user account
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Account deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResult"
+        "403":
+          description: Admin account required or the target is an admin
+        "404":
+          description: User not found
+  /pricing:
+    get:
+      operationId: listPricing
+      tags: [pricing]
+      summary: List pricing rules
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Pricing rules
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PriceRule"
+    post:
+      operationId: upsertPricing
+      tags: [admin, pricing]
+      summary: Create or update a pricing rule
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PricingInput"
+      responses:
+        "200":
+          description: Saved pricing rule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PriceRule"
+        "403":
+          description: Admin account required
+  /pricing/{id}:
+    delete:
+      operationId: deletePricing
+      tags: [admin, pricing]
+      summary: Delete a pricing rule
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Pricing rule deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResult"
+        "403":
+          description: Admin account required
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
   schemas:
     HealthStatus:
       type: object
@@ -56,6 +290,156 @@ components:
       enum:
         - car
         - motorcycle
+    UserMode:
+      type: string
+      enum: [client, driver, admin]
+    PaymentMethod:
+      type: string
+      enum: [pix, dinheiro]
+    RideStatus:
+      type: string
+      enum: [waiting, accepted, in_progress, finished, cancelled]
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        phone:
+          type: string
+        mode:
+          $ref: "#/components/schemas/UserMode"
+        vehicleType:
+          oneOf:
+            - $ref: "#/components/schemas/VehicleType"
+            - type: "null"
+        active:
+          type: boolean
+        photo:
+          type: ["string", "null"]
+        rating:
+          type: number
+        rideCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, name, phone, mode, active, rating, rideCount, createdAt]
+    LoginInput:
+      type: object
+      properties:
+        phone:
+          type: string
+        password:
+          type: string
+      required: [phone, password]
+    LoginResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        token:
+          type: string
+      required: [user, token]
+    OkResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required: [ok]
+    AdminStats:
+      type: object
+      properties:
+        totalUsers: { type: integer }
+        totalClients: { type: integer }
+        totalDrivers: { type: integer }
+        onlineDrivers: { type: integer }
+        onlineCarDrivers: { type: integer }
+        onlineMotorcycleDrivers: { type: integer }
+        totalRides: { type: integer }
+        finishedRides: { type: integer }
+        cancelledRides: { type: integer }
+        activeRides: { type: integer }
+        totalRevenue: { type: number }
+        todayRides: { type: integer }
+        todayRevenue: { type: number }
+        avgRating: { type: number }
+      required:
+        - totalUsers
+        - totalClients
+        - totalDrivers
+        - onlineDrivers
+        - onlineCarDrivers
+        - onlineMotorcycleDrivers
+        - totalRides
+        - finishedRides
+        - cancelledRides
+        - activeRides
+        - totalRevenue
+        - todayRides
+        - todayRevenue
+        - avgRating
+    AdminUserInput:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        phone:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 4
+        mode:
+          $ref: "#/components/schemas/UserMode"
+        vehicleType:
+          $ref: "#/components/schemas/VehicleType"
+      required: [name, phone, password]
+    AdminUserUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        password:
+          type: string
+          minLength: 4
+        mode:
+          $ref: "#/components/schemas/UserMode"
+        vehicleType:
+          $ref: "#/components/schemas/VehicleType"
+        active:
+          type: boolean
+    PriceRule:
+      type: object
+      properties:
+        id:
+          type: string
+        destination:
+          type: string
+        price:
+          type: number
+        isLocal:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, destination, price, createdAt]
+    PricingInput:
+      type: object
+      properties:
+        destination:
+          type: string
+          minLength: 1
+        price:
+          type: number
+          minimum: 0
+        isLocal:
+          type: boolean
+      required: [destination, price]
     Ride:
       type: object
       properties:
@@ -68,7 +452,21 @@ components:
         clientPhone:
           type: string
         clientPhoto:
-          type: string
+          type: ["string", "null"]
+        clientAvgRating:
+          type: ["number", "null"]
+        clientRideCount:
+          type: ["integer", "null"]
+        driverId:
+          type: ["string", "null"]
+        driverName:
+          type: ["string", "null"]
+        driverPhoto:
+          type: ["string", "null"]
+        driverAvgRating:
+          type: ["number", "null"]
+        driverRideCount:
+          type: ["integer", "null"]
         origin:
           type: string
         destination:
@@ -76,15 +474,25 @@ components:
         vehicleType:
           $ref: "#/components/schemas/VehicleType"
         price:
-          type: number
+          type: ["number", "null"]
         payment:
-          type: string
-          enum: [pix, dinheiro]
+          oneOf:
+            - $ref: "#/components/schemas/PaymentMethod"
+            - type: "null"
         status:
-          type: string
-          enum: [waiting, accepted, in_progress, finished, cancelled]
+          $ref: "#/components/schemas/RideStatus"
+        clientRating:
+          type: ["number", "null"]
+        driverRating:
+          type: ["number", "null"]
         createdAt:
           type: string
+          format: date-time
+        acceptedAt:
+          type: ["string", "null"]
+          format: date-time
+        finishedAt:
+          type: ["string", "null"]
           format: date-time
       required:
         - id

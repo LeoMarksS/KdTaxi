@@ -34,12 +34,19 @@ export const RequestRideResponse = zod.object({
   clientId: zod.string(),
   clientName: zod.string(),
   clientPhone: zod.string(),
-  clientPhoto: zod.string().optional(),
+  clientPhoto: zod.string().nullish(),
+  clientAvgRating: zod.number().nullish(),
+  clientRideCount: zod.number().nullish(),
+  driverId: zod.string().nullish(),
+  driverName: zod.string().nullish(),
+  driverPhoto: zod.string().nullish(),
+  driverAvgRating: zod.number().nullish(),
+  driverRideCount: zod.number().nullish(),
   origin: zod.string(),
   destination: zod.string(),
   vehicleType: zod.enum(["car", "motorcycle"]),
-  price: zod.number().optional(),
-  payment: zod.enum(["pix", "dinheiro"]).optional(),
+  price: zod.number().nullish(),
+  payment: zod.union([zod.enum(["pix", "dinheiro"]), zod.null()]).optional(),
   status: zod.enum([
     "waiting",
     "accepted",
@@ -47,5 +54,231 @@ export const RequestRideResponse = zod.object({
     "finished",
     "cancelled",
   ]),
+  clientRating: zod.number().nullish(),
+  driverRating: zod.number().nullish(),
   createdAt: zod.coerce.date(),
+  acceptedAt: zod.coerce.date().nullish(),
+  finishedAt: zod.coerce.date().nullish(),
+});
+
+/**
+ * @summary Sign in with phone and password
+ */
+export const LoginUserBody = zod.object({
+  phone: zod.string(),
+  password: zod.string(),
+});
+
+export const LoginUserResponse = zod.object({
+  user: zod.object({
+    id: zod.string(),
+    name: zod.string(),
+    phone: zod.string(),
+    mode: zod.enum(["client", "driver", "admin"]),
+    vehicleType: zod
+      .union([zod.enum(["car", "motorcycle"]), zod.null()])
+      .optional(),
+    active: zod.boolean(),
+    photo: zod.string().nullish(),
+    rating: zod.number(),
+    rideCount: zod.number(),
+    createdAt: zod.coerce.date(),
+  }),
+  token: zod.string(),
+});
+
+/**
+ * @summary Sign out the current session
+ */
+export const LogoutUserResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary Read operational statistics
+ */
+export const GetAdminStatsResponse = zod.object({
+  totalUsers: zod.number(),
+  totalClients: zod.number(),
+  totalDrivers: zod.number(),
+  onlineDrivers: zod.number(),
+  onlineCarDrivers: zod.number(),
+  onlineMotorcycleDrivers: zod.number(),
+  totalRides: zod.number(),
+  finishedRides: zod.number(),
+  cancelledRides: zod.number(),
+  activeRides: zod.number(),
+  totalRevenue: zod.number(),
+  todayRides: zod.number(),
+  todayRevenue: zod.number(),
+  avgRating: zod.number(),
+});
+
+/**
+ * @summary List client and driver accounts for administration
+ */
+export const ListUsersResponseItem = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  phone: zod.string(),
+  mode: zod.enum(["client", "driver", "admin"]),
+  vehicleType: zod
+    .union([zod.enum(["car", "motorcycle"]), zod.null()])
+    .optional(),
+  active: zod.boolean(),
+  photo: zod.string().nullish(),
+  rating: zod.number(),
+  rideCount: zod.number(),
+  createdAt: zod.coerce.date(),
+});
+export const ListUsersResponse = zod.array(ListUsersResponseItem);
+
+/**
+ * @summary List rides visible to the authenticated account
+ */
+export const ListRidesResponseItem = zod.object({
+  id: zod.string(),
+  clientId: zod.string(),
+  clientName: zod.string(),
+  clientPhone: zod.string(),
+  clientPhoto: zod.string().nullish(),
+  clientAvgRating: zod.number().nullish(),
+  clientRideCount: zod.number().nullish(),
+  driverId: zod.string().nullish(),
+  driverName: zod.string().nullish(),
+  driverPhoto: zod.string().nullish(),
+  driverAvgRating: zod.number().nullish(),
+  driverRideCount: zod.number().nullish(),
+  origin: zod.string(),
+  destination: zod.string(),
+  vehicleType: zod.enum(["car", "motorcycle"]),
+  price: zod.number().nullish(),
+  payment: zod.union([zod.enum(["pix", "dinheiro"]), zod.null()]).optional(),
+  status: zod.enum([
+    "waiting",
+    "accepted",
+    "in_progress",
+    "finished",
+    "cancelled",
+  ]),
+  clientRating: zod.number().nullish(),
+  driverRating: zod.number().nullish(),
+  createdAt: zod.coerce.date(),
+  acceptedAt: zod.coerce.date().nullish(),
+  finishedAt: zod.coerce.date().nullish(),
+});
+export const ListRidesResponse = zod.array(ListRidesResponseItem);
+
+/**
+ * @summary Create a user account
+ */
+
+export const createAdminUserBodyPasswordMin = 4;
+
+export const CreateAdminUserBody = zod.object({
+  name: zod.string().min(1),
+  phone: zod.string().min(1),
+  password: zod.string().min(createAdminUserBodyPasswordMin),
+  mode: zod.enum(["client", "driver", "admin"]).optional(),
+});
+
+export const CreateAdminUserResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  phone: zod.string(),
+  mode: zod.enum(["client", "driver", "admin"]),
+  vehicleType: zod
+    .union([zod.enum(["car", "motorcycle"]), zod.null()])
+    .optional(),
+  active: zod.boolean(),
+  photo: zod.string().nullish(),
+  rating: zod.number(),
+  rideCount: zod.number(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Update a user account
+ */
+export const UpdateAdminUserParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const updateAdminUserBodyPasswordMin = 4;
+
+export const UpdateAdminUserBody = zod.object({
+  name: zod.string().optional(),
+  phone: zod.string().optional(),
+  password: zod.string().min(updateAdminUserBodyPasswordMin).optional(),
+  mode: zod.enum(["client", "driver", "admin"]).optional(),
+  active: zod.boolean().optional(),
+});
+
+export const UpdateAdminUserResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  phone: zod.string(),
+  mode: zod.enum(["client", "driver", "admin"]),
+  vehicleType: zod
+    .union([zod.enum(["car", "motorcycle"]), zod.null()])
+    .optional(),
+  active: zod.boolean(),
+  photo: zod.string().nullish(),
+  rating: zod.number(),
+  rideCount: zod.number(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete a non-admin user account
+ */
+export const DeleteAdminUserParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const DeleteAdminUserResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary List pricing rules
+ */
+export const ListPricingResponseItem = zod.object({
+  id: zod.string(),
+  destination: zod.string(),
+  price: zod.number(),
+  isLocal: zod.boolean().optional(),
+  createdAt: zod.coerce.date(),
+});
+export const ListPricingResponse = zod.array(ListPricingResponseItem);
+
+/**
+ * @summary Create or update a pricing rule
+ */
+
+export const upsertPricingBodyPriceMin = 0;
+
+export const UpsertPricingBody = zod.object({
+  destination: zod.string().min(1),
+  price: zod.number().min(upsertPricingBodyPriceMin),
+  isLocal: zod.boolean().optional(),
+});
+
+export const UpsertPricingResponse = zod.object({
+  id: zod.string(),
+  destination: zod.string(),
+  price: zod.number(),
+  isLocal: zod.boolean().optional(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete a pricing rule
+ */
+export const DeletePricingParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const DeletePricingResponse = zod.object({
+  ok: zod.boolean(),
 });
