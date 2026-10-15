@@ -1,5 +1,5 @@
-import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { QueryCache, QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { Route, Switch, useLocation, Router as WouterRouter, Link } from 'wouter';
 import { setAuthTokenGetter } from '@workspace/api-client-react';
 import {
@@ -17,7 +17,6 @@ import {
 import logo from './assets/kd-taxi-icon.png';
 import NotFound from '@/pages/not-found';
 
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 8000 } } });
 const TOKEN_KEY = 'kd-taxi-admin-token';
 const USER_KEY = 'kd-taxi-admin-user';
 setAuthTokenGetter(() => sessionStorage.getItem(TOKEN_KEY));
@@ -25,13 +24,19 @@ setAuthTokenGetter(() => sessionStorage.getItem(TOKEN_KEY));
 type PageName = 'overview' | 'users' | 'rides' | 'pricing';
 type ToastState = { message: string; kind?: 'error' | 'success' } | null;
 
+const isAuthError = (error: unknown) => Boolean(error && typeof error === 'object' && 'status' in error && ((error as { status: number }).status === 401 || (error as { status: number }).status === 403));
+const raiseAuthExpired = () => window.dispatchEvent(new Event('kd-taxi-auth-expired'));
+const AUTO_REFRESH_MS = 60_000;
+const queryClient = new QueryClient({
+  queryCache: new QueryCache({ onError: (error) => { if (isAuthError(error)) raiseAuthExpired(); } }),
+  defaultOptions: { queries: { retry: 1, staleTime: 30_000, refetchOnWindowFocus: false, refetchIntervalInBackground: false } },
+});
+
 const formatMoney = (value?: number | null) => value == null ? '—' : new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 const formatDate = (value?: string | null) => value ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : '—';
 const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map((word) => word[0]).join('').toUpperCase();
 const roleName = (mode: User['mode']) => mode === 'driver' ? 'Motorista' : mode === 'admin' ? 'Administrador' : 'Cliente';
 const rideStatusName: Record<Ride['status'], string> = { waiting: 'Aguardando', accepted: 'Aceita', in_progress: 'Em andamento', finished: 'Concluída', cancelled: 'Cancelada' };
-const isAuthError = (error: unknown) => Boolean(error && typeof error === 'object' && 'status' in error && ((error as { status: number }).status === 401 || (error as { status: number }).status === 403));
-const raiseAuthExpired = () => window.dispatchEvent(new Event('kd-taxi-auth-expired'));
 
 function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
   useEffect(() => {
@@ -95,16 +100,16 @@ function StatCard({ label, value, note, icon, trend, accent = false }: { label: 
 }
 
 function Dashboard({ goRides }: { goRides: () => void }) {
-  const statsQuery = useGetAdminStats({ query: { queryKey: getGetAdminStatsQueryKey(), refetchInterval: 30000 } });
-  const ridesQuery = useListRides({ query: { queryKey: getListRidesQueryKey(), refetchInterval: 30000 } });
+  const statsQuery = useGetAdminStats({ query: { queryKey: getGetAdminStatsQueryKey(), refetchInterval: AUTO_REFRESH_MS } });
+  const ridesQuery = useListRides({ query: { queryKey: getListRidesQueryKey(), refetchInterval: AUTO_REFRESH_MS } });
   const stats = statsQuery.data as AdminStats | undefined;
   const recentRides = useMemo(() => [...(ridesQuery.data ?? [])].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)).slice(0, 6), [ridesQuery.data]);
   const refresh = () => { void statsQuery.refetch(); void ridesQuery.refetch(); };
   return <main className="page-enter">
     <div className="page-heading"><div><div className="eyebrow">CENTRAL DE OPERAÇÕES <span className="live-indicator">● AO VIVO</span></div><h1>Visão geral</h1><p>O pulso da operação, em um só lugar.</p></div>
-      <div className="heading-actions"><span className="updated-note"><span className="live-dot" /> Atualização automática · 30 s</span><Button variant="secondary" onClick={refresh} testId="button-refresh-overview"><RefreshCw size={15} /> Atualizar</Button></div></div>
+      <div className="heading-actions"><span className="updated-note"><span className="live-dot" /> Atualização automática · 1 min</span><Button variant="secondary" onClick={refresh} testId="button-refresh-overview"><RefreshCw size={15} /> Atualizar</Button></div></div>
     {statsQuery.isLoading ? <div className="stats-grid">{Array.from({ length: 6 }, (_, index) => <div className="stat-card stat-skeleton" key={index}><div className="skeleton sk-line" /><div className="skeleton sk-big" /><div className="skeleton sk-line short" /></div>)}</div> :
-      statsQuery.isError ? <QueryError onRetry={() => void statsQuery.refetch()} /> : stats && <>
+      statsQuery.isError && !stats ? <QueryError onRetry={() => void statsQuery.refetch()} /> : stats && <>
         <section className="stats-grid">
           <StatCard label="Corridas hoje" value={stats.todayRides.toLocaleString('pt-BR')} note={`${stats.activeRides} em andamento agora`} icon={<Activity size={17} />} trend={<ArrowUpRight size={16} className="trend-icon" />} accent />
           <StatCard label="Faturamento hoje" value={formatMoney(stats.todayRevenue)} note={`${stats.finishedRides.toLocaleString('pt-BR')} concluídas no total`} icon={<DollarSign size={17} />} />
@@ -121,7 +126,7 @@ function Dashboard({ goRides }: { goRides: () => void }) {
         </section>
         <section className="content-panel recent-panel">
           <div className="panel-heading"><div><div className="eyebrow">MOVIMENTO RECENTE</div><h2>Últimas corridas</h2></div><Button variant="plain" onClick={goRides} testId="button-view-all-rides">Ver todas <ArrowRight size={15} /></Button></div>
-          {ridesQuery.isLoading ? <LoadingRows count={4} /> : ridesQuery.isError ? <QueryError onRetry={() => void ridesQuery.refetch()} /> : recentRides.length === 0 ?
+          {ridesQuery.isLoading && !ridesQuery.data ? <LoadingRows count={4} /> : ridesQuery.isError && !ridesQuery.data ? <QueryError onRetry={() => void ridesQuery.refetch()} /> : recentRides.length === 0 ?
             <EmptyState title="Nenhuma corrida por aqui" text="As corridas recentes aparecerão aqui quando houver atividade." /> :
             <div className="table-wrap"><table><thead><tr><th>Corrida</th><th>Trajeto</th><th>Motorista</th><th>Status</th><th>Valor</th><th>Solicitada</th></tr></thead><tbody>
               {recentRides.map((ride) => <RideRow key={ride.id} ride={ride} compact />)}
@@ -145,7 +150,7 @@ function RideRow({ ride, compact = false }: { ride: Ride; compact?: boolean }) {
 
 function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'error') => void }) {
   const queryClient = useQueryClient();
-  const query = useListUsers({ query: { queryKey: getListUsersQueryKey(), refetchInterval: 30000 } });
+  const query = useListUsers({ query: { queryKey: getListUsersQueryKey(), refetchInterval: AUTO_REFRESH_MS } });
   const createUser = useCreateAdminUser();
   const updateUser = useUpdateAdminUser();
   const deleteUser = useDeleteAdminUser();
@@ -189,7 +194,7 @@ function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'er
     <section className="content-panel list-panel">
       <div className="filters-row"><div className="search-field"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome ou telefone" aria-label="Buscar usuários" data-testid="input-search-users" />{search && <button onClick={() => setSearch('')} aria-label="Limpar busca" data-testid="button-clear-user-search"><X size={14} /></button>}</div>
         <div className="filter-pills" role="group" aria-label="Filtrar usuários">{(['all', 'client', 'driver'] as const).map((option) => <button key={option} className={filter === option ? 'filter-active' : ''} onClick={() => setFilter(option)} data-testid={`filter-users-${option}`}>{option === 'all' ? `Todos ${users.length}` : `${roleName(option)} ${countByMode(option)}`}</button>)}</div></div>
-      {query.isLoading ? <LoadingRows /> : query.isError ? <QueryError onRetry={() => void query.refetch()} /> : filtered.length === 0 ?
+       {query.isLoading && !query.data ? <LoadingRows /> : query.isError && !query.data ? <QueryError onRetry={() => void query.refetch()} /> : filtered.length === 0 ?
         <EmptyState title={search ? 'Nenhum resultado' : 'Nenhum usuário cadastrado'} text={search ? 'Tente buscar por outro nome ou telefone.' : 'Cadastros aparecerão aqui quando forem criados.'} /> :
         <div className="table-wrap"><table><thead><tr><th>Perfil</th><th>Tipo</th><th>Corridas</th><th>Avaliação</th><th>Cadastro</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>
           {filtered.map((user) => <tr key={user.id} data-testid={`row-user-${user.id}`}>
@@ -201,7 +206,7 @@ function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'er
               <IconButton label={`Excluir ${user.name}`} onClick={() => setRemoving(user)} testId={`button-delete-user-${user.id}`}><Trash2 size={16} /></IconButton></div></td>
           </tr>)}
         </tbody></table></div>}
-      <div className="table-footer"><span>Exibindo <b>{filtered.length}</b> de <b>{users.length}</b> usuários</span><span className="mono">SINCRONIZAÇÃO AUTOMÁTICA · 30 S</span></div>
+       <div className="table-footer"><span>Exibindo <b>{filtered.length}</b> de <b>{users.length}</b> usuários</span><span className="mono">ATUALIZAÇÃO AUTOMÁTICA · 1 MIN</span></div>
     </section>
     {(creating || modalUser) && <Dialog title={editing ? 'Editar perfil' : 'Novo usuário'} subtitle={editing ? 'Atualize os dados básicos deste cadastro.' : 'Cadastre um cliente ou motorista na plataforma.'} onClose={() => { setCreating(false); setEditing(null); }} >
       <form onSubmit={saveUser} className="form-stack">
@@ -222,7 +227,7 @@ function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'er
 }
 
 function RidesPage() {
-  const query = useListRides({ query: { queryKey: getListRidesQueryKey(), refetchInterval: 30000 } });
+  const query = useListRides({ query: { queryKey: getListRidesQueryKey(), refetchInterval: AUTO_REFRESH_MS } });
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const rides = query.data ?? [];
@@ -230,12 +235,12 @@ function RidesPage() {
   const options = ['all', 'waiting', 'accepted', 'in_progress', 'finished', 'cancelled'];
   const count = (status: string) => status === 'all' ? rides.length : rides.filter((ride) => ride.status === status).length;
   return <main className="page-enter">
-    <div className="page-heading"><div><div className="eyebrow">ACOMPANHAMENTO · {rides.length.toLocaleString('pt-BR')} REGISTROS</div><h1>Corridas</h1><p>Visibilidade completa do início ao destino.</p></div><span className="updated-note"><span className="live-dot" /> Atualização automática · 30 s</span></div>
+     <div className="page-heading"><div><div className="eyebrow">ACOMPANHAMENTO · {rides.length.toLocaleString('pt-BR')} REGISTROS</div><h1>Corridas</h1><p>Visibilidade completa do início ao destino.</p></div><span className="updated-note"><span className="live-dot" /> Atualização automática · 1 min</span></div>
     <section className="content-panel list-panel">
       <div className="filters-row rides-filter-row"><div className="search-field ride-search"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar passageiro, motorista ou trajeto" aria-label="Buscar corridas" data-testid="input-search-rides" />{search && <button onClick={() => setSearch('')} aria-label="Limpar busca" data-testid="button-clear-ride-search"><X size={14} /></button>}</div>
         <span className="filter-count"><SlidersHorizontal size={14} /> {filtered.length} resultados</span></div>
       <div className="filter-pills status-filters">{options.map((status) => <button key={status} className={filter === status ? 'filter-active' : ''} onClick={() => setFilter(status)} data-testid={`filter-rides-${status}`}>{status === 'all' ? 'Todas' : rideStatusName[status as Ride['status']]} <span>{count(status)}</span></button>)}</div>
-      {query.isLoading ? <LoadingRows count={7} /> : query.isError ? <QueryError onRetry={() => void query.refetch()} /> : filtered.length === 0 ?
+       {query.isLoading && !query.data ? <LoadingRows count={7} /> : query.isError && !query.data ? <QueryError onRetry={() => void query.refetch()} /> : filtered.length === 0 ?
         <EmptyState title={search ? 'Nenhuma corrida encontrada' : 'Sem corridas para exibir'} text={search ? 'Revise o termo ou selecione outro status.' : 'Quando uma corrida for solicitada, ela será listada aqui.'} /> :
         <div className="table-wrap"><table className="rides-table"><thead><tr><th>Passageiro</th><th>Origem → destino</th><th>Motorista</th><th>Veículo</th><th>Status</th><th>Pagamento</th><th>Valor</th><th>Solicitada</th></tr></thead><tbody>
           {filtered.map((ride) => <tr key={ride.id} data-testid={`row-ride-${ride.id}`}>
@@ -247,52 +252,78 @@ function RidesPage() {
             <td className="mono price-value">{formatMoney(ride.price)}</td><td><div className="ride-dates"><span>{formatDate(ride.createdAt)}</span>{ride.acceptedAt && <small>Aceita · {formatDate(ride.acceptedAt)}</small>}{ride.finishedAt && <small>Finalizada · {formatDate(ride.finishedAt)}</small>}</div></td>
           </tr>)}
         </tbody></table></div>}
-      <div className="table-footer"><span>Exibindo <b>{filtered.length}</b> de <b>{rides.length}</b> corridas</span><span className="mono">DADOS ATUALIZADOS A CADA 30 S</span></div>
+       <div className="table-footer"><span>Exibindo <b>{filtered.length}</b> de <b>{rides.length}</b> corridas</span><span className="mono">ATUALIZAÇÃO AUTOMÁTICA · 1 MIN</span></div>
     </section>
   </main>;
 }
 
 function PricingPage({ notify }: { notify: (message: string, kind?: 'success' | 'error') => void }) {
   const queryClient = useQueryClient();
-  const query = useListPricing({ query: { queryKey: getListPricingQueryKey(), refetchInterval: 30000 } });
+  const query = useListPricing({ query: { queryKey: getListPricingQueryKey(), refetchInterval: AUTO_REFRESH_MS } });
   const upsert = useUpsertPricing();
   const deleteRule = useDeletePricing();
   const [editing, setEditing] = useState<PriceRule | null>(null);
   const [removing, setRemoving] = useState<PriceRule | null>(null);
   const [formError, setFormError] = useState('');
+  const [localPriceError, setLocalPriceError] = useState('');
   const rules = useMemo(() => [...(query.data ?? [])].sort((a, b) => Number(Boolean(b.isLocal)) - Number(Boolean(a.isLocal)) || a.destination.localeCompare(b.destination)), [query.data]);
+  const localRule = rules.find((rule) => rule.isLocal);
+  const destinationRules = rules.filter((rule) => !rule.isLocal);
   const save = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setFormError('');
     const form = new FormData(event.currentTarget);
     const destination = String(form.get('destination') ?? '').trim();
     const price = Number(form.get('price'));
     if (!destination || !Number.isFinite(price) || price < 0) { setFormError('Informe um destino e um preço válido.'); return; }
-    const data: PricingInput = { destination, price, isLocal: form.get('isLocal') === 'on' };
+    const data: PricingInput = { destination, price, isLocal: false };
     upsert.mutate({ data }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListPricingQueryKey() }); setEditing(null); notify(editing?.id ? 'Regra de preço atualizada.' : 'Regra de preço criada.'); }, onError: (error) => { if (isAuthError(error)) raiseAuthExpired(); setFormError(isAuthError(error) ? 'Sua sessão expirou. Entre novamente.' : 'Não foi possível salvar a regra. Confira os dados e tente novamente.'); } });
+  };
+  const saveLocalPrice = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); setLocalPriceError('');
+    const price = Number(new FormData(event.currentTarget).get('localPrice'));
+    if (!Number.isFinite(price) || price < 0) { setLocalPriceError('Informe um preço local válido.'); return; }
+    const data: PricingInput = { destination: 'Corridas locais', price, isLocal: true };
+    upsert.mutate({ data }, {
+      onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListPricingQueryKey() }); notify('Preço fixo local salvo.'); },
+      onError: (error) => { if (isAuthError(error)) raiseAuthExpired(); setLocalPriceError(isAuthError(error) ? 'Sua sessão expirou. Entre novamente.' : 'Não foi possível salvar o preço local. Tente novamente.'); },
+    });
   };
   const confirmDelete = () => {
     if (!removing) return;
-    deleteRule.mutate({ id: removing.id }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListPricingQueryKey() }); setRemoving(null); notify('Regra removida.'); }, onError: (error) => { if (isAuthError(error)) { raiseAuthExpired(); return; } notify('Não foi possível remover esta regra.', 'error'); } });
+    const wasLocal = removing.isLocal;
+    deleteRule.mutate({ id: removing.id }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListPricingQueryKey() }); setRemoving(null); notify(wasLocal ? 'Preço local removido; destinos sem regra ficarão sem tarifa.' : 'Regra removida.'); }, onError: (error) => { if (isAuthError(error)) { raiseAuthExpired(); return; } notify('Não foi possível remover esta regra.', 'error'); } });
   };
   return <main className="page-enter">
-    <div className="page-heading"><div><div className="eyebrow">TARIFAS · {rules.length.toLocaleString('pt-BR')} REGRAS</div><h1>Preços</h1><p>Regras claras para cada destino atendido.</p></div><Button onClick={() => { setFormError(''); setEditing(null); setEditing({ id: '', destination: '', price: 0, isLocal: false, createdAt: '' }); }} testId="button-add-price"><Plus size={16} /> Nova regra</Button></div>
-    <section className="pricing-intro"><span className="price-illustration"><Tag size={22} /></span><div><div className="eyebrow">TABELA DE TARIFAS</div><h2>Preço previsível, viagem tranquila.</h2><p>Os valores cadastrados aqui orientam as corridas por destino.</p></div><div className="price-total"><small>DESTINOS CONFIGURADOS</small><b>{rules.length.toString().padStart(2, '0')}</b></div></section>
-    {query.isLoading ? <div className="price-grid">{Array.from({ length: 4 }, (_, index) => <div className="price-card" key={index}><div className="skeleton sk-line" /><div className="skeleton sk-big" /></div>)}</div> : query.isError ? <QueryError onRetry={() => void query.refetch()} /> : rules.length === 0 ?
-      <div className="content-panel pricing-empty"><EmptyState title="Ainda não há regras de preço" text="Adicione um destino para começar a configurar as tarifas." action={<Button onClick={() => setEditing({ id: '', destination: '', price: 0, isLocal: false, createdAt: '' })} testId="button-add-first-price"><Plus size={15} /> Adicionar destino</Button>} /></div> :
-      <div className="price-grid">{rules.map((rule, index) => <article className="price-card" key={rule.id} data-testid={`card-price-${rule.id}`}>
-        <div className="price-card-top"><span className={`price-index ${rule.isLocal ? 'local-index' : ''}`}>{String(index + 1).padStart(2, '0')}</span><div className="row-actions"><IconButton label={`Editar preço de ${rule.destination}`} onClick={() => { setFormError(''); setEditing(rule); }} testId={`button-edit-price-${rule.id}`}><Settings2 size={16} /></IconButton><IconButton label={`Excluir regra de ${rule.destination}`} onClick={() => setRemoving(rule)} testId={`button-delete-price-${rule.id}`}><Trash2 size={16} /></IconButton></div></div>
-        <div className="price-place"><MapPin size={15} /><h3 data-testid={`text-price-destination-${rule.id}`}>{rule.destination}</h3></div>
-        <div className="price-card-value"><b>{formatMoney(rule.price)}</b><small>por viagem</small></div>
-        <div className="price-card-bottom">{rule.isLocal ? <span className="local-badge"><Check size={12} /> Tarifa local</span> : <span className="destination-badge">Destino</span>}<small>Incluído {new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium' }).format(new Date(rule.createdAt))}</small></div>
-      </article>)}</div>}
+    <div className="page-heading"><div><div className="eyebrow">TARIFAS · {destinationRules.length.toLocaleString('pt-BR')} DESTINOS</div><h1>Preços</h1><p>Uma tarifa padrão local e valores específicos por destino.</p></div><Button onClick={() => { setFormError(''); setEditing({ id: '', destination: '', price: 0, isLocal: false, createdAt: '' }); }} testId="button-add-price"><Plus size={16} /> Nova regra</Button></div>
+    <section className="pricing-intro"><span className="price-illustration"><Tag size={22} /></span><div><div className="eyebrow">TABELA DE TARIFAS</div><h2>Preço previsível, viagem tranquila.</h2><p>Destinos específicos têm prioridade sobre o preço fixo local.</p></div><div className="price-total"><small>DESTINOS CONFIGURADOS</small><b>{destinationRules.length.toString().padStart(2, '0')}</b></div></section>
+    {query.isLoading && !query.data ? <div className="price-grid">{Array.from({ length: 4 }, (_, index) => <div className="price-card" key={index}><div className="skeleton sk-line" /><div className="skeleton sk-big" /></div>)}</div> : query.isError && !query.data ? <QueryError onRetry={() => void query.refetch()} /> : <>
+      <section className="local-price-panel" data-testid="panel-local-price">
+        <div className="local-price-copy"><div className="eyebrow">PREÇO PADRÃO DA CIDADE</div><h2>Preço fixo local</h2><p>Usado quando o destino da corrida não corresponde a nenhuma regra específica da lista.</p>
+          {localRule ? <span className="local-price-current"><Check size={13} /> Em vigor: {formatMoney(localRule.price)} por corrida</span> : <span className="local-price-missing">Nenhum preço local cadastrado ainda.</span>}
+        </div>
+        <form onSubmit={saveLocalPrice} className="local-price-form">
+          <label htmlFor="local-price-input">Valor local</label>
+          <div className="currency-input"><span>R$</span><input id="local-price-input" name="localPrice" type="number" min="0" step="0.01" defaultValue={localRule?.price ?? ''} required placeholder="0,00" data-testid="input-local-price" /></div>
+          {localPriceError && <div className="form-alert" role="alert">{localPriceError}</div>}
+          <div className="local-price-actions"><Button type="submit" disabled={upsert.isPending} testId="button-save-local-price">{upsert.isPending ? 'Salvando…' : 'Salvar preço local'}</Button>{localRule && <Button variant="plain" onClick={() => setRemoving(localRule)} testId="button-delete-local-price">Remover</Button>}</div>
+        </form>
+      </section>
+      {destinationRules.length === 0 ?
+        <div className="content-panel pricing-empty"><EmptyState title="Ainda não há destinos específicos" text="O preço fixo local será usado até você cadastrar uma tarifa para um destino." action={<Button onClick={() => setEditing({ id: '', destination: '', price: 0, isLocal: false, createdAt: '' })} testId="button-add-first-price"><Plus size={15} /> Adicionar destino</Button>} /></div> :
+        <div className="price-grid">{destinationRules.map((rule, index) => <article className="price-card" key={rule.id} data-testid={`card-price-${rule.id}`}>
+          <div className="price-card-top"><span className="price-index">{String(index + 1).padStart(2, '0')}</span><div className="row-actions"><IconButton label={`Editar preço de ${rule.destination}`} onClick={() => { setFormError(''); setEditing(rule); }} testId={`button-edit-price-${rule.id}`}><Settings2 size={16} /></IconButton><IconButton label={`Excluir regra de ${rule.destination}`} onClick={() => setRemoving(rule)} testId={`button-delete-price-${rule.id}`}><Trash2 size={16} /></IconButton></div></div>
+          <div className="price-place"><MapPin size={15} /><h3 data-testid={`text-price-destination-${rule.id}`}>{rule.destination}</h3></div>
+          <div className="price-card-value"><b>{formatMoney(rule.price)}</b><small>por viagem</small></div>
+          <div className="price-card-bottom"><span className="destination-badge">Destino específico</span><small>Incluído {new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium' }).format(new Date(rule.createdAt))}</small></div>
+        </article>)}</div>}
+    </>}
     {editing && <Dialog title={editing.id ? 'Editar regra' : 'Nova regra de preço'} subtitle="Configure o preço aplicado a um destino." onClose={() => setEditing(null)}>
-      <form onSubmit={save} className="form-stack"><label>Destino<input name="destination" defaultValue={editing.destination} required autoFocus readOnly={Boolean(editing.id)} placeholder="Ex.: Centro, Aeroporto" data-testid="input-price-destination" />{editing.id && <small className="field-hint">O destino identifica a regra; altere o preço e a indicação de tarifa local.</small>}</label>
+      <form onSubmit={save} className="form-stack"><label>Destino<input name="destination" defaultValue={editing.destination} required autoFocus readOnly={Boolean(editing.id)} placeholder="Ex.: Centro, Aeroporto" data-testid="input-price-destination" />{editing.id && <small className="field-hint">O destino identifica a regra; para alterar o preço local, use o cartão acima.</small>}</label>
         <label>Preço por viagem<div className="currency-input"><span>R$</span><input name="price" defaultValue={editing.price || ''} type="number" min="0" step="0.01" required placeholder="0,00" data-testid="input-price-value" /></div></label>
-        <label className="check-label"><input type="checkbox" name="isLocal" defaultChecked={Boolean(editing.isLocal)} data-testid="checkbox-price-local" /><span>Tarifa local</span><small>Identifica um destino da área local.</small></label>
         {formError && <div className="form-alert" role="alert">{formError}</div>}<div className="dialog-actions"><Button variant="secondary" onClick={() => setEditing(null)} testId="button-cancel-price">Cancelar</Button><Button type="submit" disabled={upsert.isPending} testId="button-save-price">{upsert.isPending ? 'Salvando…' : editing.id ? 'Salvar regra' : 'Criar regra'}</Button></div>
       </form>
     </Dialog>}
-    {removing && <Dialog title="Excluir regra?" subtitle={`A tarifa para ${removing.destination} será removida.`} onClose={() => setRemoving(null)}><div className="warning-card"><Trash2 size={17} /><span>Essa ação não pode ser desfeita.</span></div><div className="dialog-actions"><Button variant="secondary" onClick={() => setRemoving(null)} testId="button-cancel-delete-price">Cancelar</Button><Button variant="danger" onClick={confirmDelete} disabled={deleteRule.isPending} testId="button-confirm-delete-price">{deleteRule.isPending ? 'Excluindo…' : 'Excluir regra'}</Button></div></Dialog>}
+    {removing && <Dialog title={removing.isLocal ? 'Remover preço local?' : 'Excluir regra?'} subtitle={removing.isLocal ? 'Destinos sem regra específica ficarão sem preço automático.' : `A tarifa para ${removing.destination} será removida.`} onClose={() => setRemoving(null)}><div className="warning-card"><Trash2 size={17} /><span>Essa ação não pode ser desfeita.</span></div><div className="dialog-actions"><Button variant="secondary" onClick={() => setRemoving(null)} testId="button-cancel-delete-price">Cancelar</Button><Button variant="danger" onClick={confirmDelete} disabled={deleteRule.isPending} testId="button-confirm-delete-price">{deleteRule.isPending ? 'Excluindo…' : 'Excluir regra'}</Button></div></Dialog>}
   </main>;
 }
 
@@ -374,22 +405,16 @@ function AppContent() {
   const [authNotice, setAuthNotice] = useState('');
   const [location, setLocation] = useLocation();
   const queryClient = useQueryClient();
-  const logout = () => {
+  const logout = useCallback(() => {
     sessionStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(USER_KEY); setUser(null);
     queryClient.clear(); setAuthNotice('Sua sessão terminou. Entre novamente para continuar.'); setLocation('/signin');
-  };
-  const notify = (message: string, kind: 'success' | 'error' = 'success') => setToast({ message, kind });
-  const stats = useGetAdminStats({ query: { enabled: Boolean(user), queryKey: getGetAdminStatsQueryKey(), refetchInterval: 45000 } });
-  const users = useListUsers({ query: { enabled: Boolean(user), queryKey: getListUsersQueryKey(), refetchInterval: 45000 } });
-  const rides = useListRides({ query: { enabled: Boolean(user), queryKey: getListRidesQueryKey(), refetchInterval: 45000 } });
-  const pricing = useListPricing({ query: { enabled: Boolean(user), queryKey: getListPricingQueryKey(), refetchInterval: 45000 } });
-  const authFailure = [stats.error, users.error, rides.error, pricing.error].some(isAuthError);
-  useEffect(() => { if (authFailure && user) { setAuthNotice('Sua sessão expirou ou não tem permissão. Entre novamente.'); logout(); } }, [authFailure, user]);
+  }, [queryClient, setLocation]);
+  const notify = useCallback((message: string, kind: 'success' | 'error' = 'success') => setToast({ message, kind }), []);
   useEffect(() => {
     const handleAuthExpired = () => { setAuthNotice('Sua sessão expirou ou não tem permissão. Entre novamente.'); logout(); };
     window.addEventListener('kd-taxi-auth-expired', handleAuthExpired);
     return () => window.removeEventListener('kd-taxi-auth-expired', handleAuthExpired);
-  }, []);
+  }, [logout]);
   useEffect(() => { if (!user && location !== '/signin') setLocation('/signin'); }, [user, location]);
   const signedIn = (nextUser: User, token: string) => {
     sessionStorage.setItem(TOKEN_KEY, token); sessionStorage.setItem(USER_KEY, JSON.stringify(nextUser)); setUser(nextUser); setAuthNotice('');
