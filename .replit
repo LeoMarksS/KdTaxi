@@ -34,3 +34,6 @@ exposeLocalhost = true
 
 [nix]
 channel = "stable-25_05"
+
+[objectStorage]
+defaultBucketID = "replit-objstore-5bb8044d-2f4f-469b-bdab-f8407981cfa0"
