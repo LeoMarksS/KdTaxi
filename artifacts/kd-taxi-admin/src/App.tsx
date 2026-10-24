@@ -399,22 +399,39 @@ const [user, setUser] = useState<User | null>(() => {
     const token = localStorage.getItem(TOKEN_KEY);
     if (!token) return null;
     const savedRaw = localStorage.getItem(USER_KEY);
-    if (!savedRaw) {
-      return null;
-    }
+    if (!savedRaw) return null;
     const saved = JSON.parse(savedRaw) as User | null;
-    if (saved && saved.mode !== 'admin') {
+    if (saved && saved.mode && saved.mode !== 'admin') {
       localStorage.removeItem(TOKEN_KEY);
       localStorage.removeItem(USER_KEY);
       return null;
     }
     return saved;
   } catch {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
     return null;
   }
 });
+
+// Restaura sessão se tem token mas sem user (fix CMD+R)
+useEffect(() => {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (token && !user) {
+    const apiUrl = (import.meta as any).env?.VITE_API_URL || 'https://kdtaxi-api.onrender.com/api';
+    fetch(`${apiUrl}/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d.user) {
+          localStorage.setItem(USER_KEY, JSON.stringify(d.user));
+          setUser(d.user);
+        }
+      })
+      .catch(() => {
+        // Token inválido, limpa
+      });
+  }
+}, [user]);
 
 const logout = useCallback(() => {
   const token = localStorage.getItem(TOKEN_KEY);
