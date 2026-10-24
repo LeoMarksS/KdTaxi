@@ -88,8 +88,7 @@ const chatByRide: Map<string, ChatMessage[]> = new Map();
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function getId() {
-  // Usa UUID válido para coluna uuid no Neon
-  return crypto.randomUUID();
+  return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
 }
 
 function createSession(userId: string): string {
@@ -171,7 +170,7 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
 }
 
 const defaultAdmin: User = {
-  id: "00000000-0000-0000-0000-000000000001",
+  id: "admin-default",
   name: "Administrador",
   phone: "admin",
   passwordHash: bcrypt.hashSync("admin123", 10),
@@ -209,56 +208,7 @@ async function loadUsersFromNeon() {
     console.error("Erro ao carregar usuários do Neon:", e);
   }
 }
-
-async function loadSessionsFromNeon() {
-  if (!pool) return;
-  try {
-    const res = await pool.query(`SELECT token, conta_id, expira_em FROM sessoes WHERE expira_em > NOW()`);
-    for (const row of res.rows) {
-      const expiresAt = row.expira_em ? new Date(row.expira_em).getTime() : Date.now() + 7*24*60*60*1000;
-      if (row.token && row.conta_id) {
-        sessions.set(row.token, { userId: row.conta_id, expiresAt });
-      }
-    }
-    console.log(`✅ ${res.rows.length} sessões carregadas do Neon para memória`);
-  } catch (e) {
-    console.error("Erro ao carregar sessões do Neon:", e);
-  }
-}
-
-async function loadRidesFromNeon() {
-  if (!pool) return;
-  try {
-    const res = await pool.query(`SELECT * FROM corridas WHERE status != 'finished' AND status != 'cancelled' ORDER BY created_at DESC LIMIT 100`);
-    for (const row of res.rows) {
-      const ride: Ride = {
-        id: row.id,
-        clientId: row.client_id,
-        clientName: row.client_name,
-        clientPhone: row.client_phone,
-        origin: row.origin,
-        destination: row.destination,
-        vehicleType: (row.vehicle_type as any) || "car",
-        status: (row.status as any) || "waiting",
-        driverId: row.driver_id,
-        price: row.price ? Number(row.price) : undefined,
-        payment: row.payment as any,
-        createdAt: row.created_at,
-        acceptedAt: row.accepted_at,
-        finishedAt: row.finished_at,
-      };
-      rides.set(ride.id, ride);
-    }
-    console.log(`✅ ${res.rows.length} corridas ativas carregadas do Neon`);
-  } catch (e) {
-    console.error("Erro ao carregar corridas do Neon:", e);
-  }
-}
-
-loadUsersFromNeon().then(() => {
-  loadSessionsFromNeon();
-  loadRidesFromNeon();
-});
+loadUsersFromNeon();
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -447,9 +397,6 @@ router.put("/users/:id/toggle", requireAdmin, (req, res) => {
     return;
   }
   user.active = !user.active;
-  if (pool) {
-    pool.query(`UPDATE contas SET active = $1 WHERE id = $2`, [user.active, user.id]).catch(console.error);
-  }
   res.json(safeUserList(user));
 });
 
@@ -498,10 +445,6 @@ router.post("/rides", requireAuth, (req, res) => {
     createdAt: new Date().toISOString(),
   };
   rides.set(ride.id, ride);
-  if (pool) {
-    pool.query(`INSERT INTO corridas (id, client_id, client_name, client_phone, origin, destination, vehicle_type, status, price, payment, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`,
-    [ride.id, ride.clientId, ride.clientName, ride.clientPhone, ride.origin, ride.destination, ride.vehicleType, ride.status, ride.price, ride.payment, ride.createdAt]).catch(console.error);
-  }
   res.json(ride);
 });
 
@@ -591,5 +534,20 @@ router.delete("/pricing/:id", requireAdmin, (req, res) => {
   pricing.delete(req.params.id);
   res.json({ ok: true });
 });
+
+
+// POST /logout - apaga sessão do Neon
+router.post("/logout", requireAuth, async (req, res) => {
+  const auth = req.headers.authorization;
+  const token = auth?.slice(7);
+  if (token) {
+    sessions.delete(token);
+    if (pool) {
+      try { await deleteSessionDb(token); console.log(`🗑️ Sessão apagada: ${token.slice(0,8)}...`); } catch(e){ console.error(e); }
+    }
+  }
+  res.json({ ok: true });
+});
+
 
 export default router;

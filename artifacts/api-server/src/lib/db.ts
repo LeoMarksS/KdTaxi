@@ -24,51 +24,41 @@ export async function initDb() {
       ALTER TABLE contas ADD COLUMN IF NOT EXISTS ride_count INT DEFAULT 0;
       ALTER TABLE contas ADD COLUMN IF NOT EXISTS password_hash TEXT;
     `);
-    // Ajusta tabela sessoes existente (que tem id, conta_id, token, expira_em) - adiciona colunas faltantes e garante compatibilidade
     await pool.query(`
       CREATE TABLE IF NOT EXISTS sessoes (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        conta_id uuid,
-        token text NOT NULL UNIQUE,
-        expira_em timestamp with time zone,
-        conta text
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        expires_at BIGINT NOT NULL
       );
     `);
-    await pool.query(`ALTER TABLE sessoes ADD COLUMN IF NOT EXISTS conta_id uuid;`);
-    await pool.query(`ALTER TABLE sessoes ADD COLUMN IF NOT EXISTS token text;`);
-    await pool.query(`ALTER TABLE sessoes ADD COLUMN IF NOT EXISTS expira_em timestamp with time zone;`);
-    await pool.query(`ALTER TABLE sessoes ADD COLUMN IF NOT EXISTS expira_em_timestamptz timestamp with time zone;`);
-    // Cria tabela corridas se não existir
     await pool.query(`
       CREATE TABLE IF NOT EXISTS corridas (
-        id uuid PRIMARY KEY,
-        client_id uuid,
-        client_name text,
-        client_phone text,
-        origin text,
-        destination text,
-        vehicle_type text,
-        status text,
-        driver_id uuid,
-        price double precision,
-        payment text,
-        created_at timestamp with time zone DEFAULT NOW(),
-        accepted_at timestamp with time zone,
-        finished_at timestamp with time zone
+        id TEXT PRIMARY KEY,
+        client_id TEXT,
+        client_name TEXT,
+        client_phone TEXT,
+        origin TEXT,
+        destination TEXT,
+        vehicle_type TEXT,
+        status TEXT,
+        driver_id TEXT,
+        price DOUBLE PRECISION,
+        payment TEXT,
+        created_at TEXT,
+        accepted_at TEXT,
+        finished_at TEXT
       );
     `);
-    // ID fixo UUID válido para admin
-    const adminId = '00000000-0000-0000-0000-000000000001';
     const adminExists = await pool.query(`SELECT id FROM contas WHERE phone = 'admin' OR email = 'admin' LIMIT 1`);
     if (adminExists.rows.length === 0) {
       const bcrypt = await import("bcryptjs");
       const hash = bcrypt.hashSync("admin123", 10);
       await pool.query(`
         INSERT INTO contas (id, nome, email, phone, senha, password_hash, tipo, mode, active, rating, ride_count, created_at)
-        VALUES ($1, 'Administrador', 'admin', 'admin', 'admin123', $2, 'admin', 'admin', true, 0, 0, NOW())
+        VALUES ('admin-default', 'Administrador', 'admin', 'admin', 'admin123', $1, 'admin', 'admin', true, 0, 0, NOW())
         ON CONFLICT (id) DO NOTHING
-      `, [adminId, hash]);
-      console.log("Admin criado no Neon com UUID", adminId);
+      `, [hash]);
+      console.log("Admin criado no Neon");
     }
     console.log("✅ Neon conectado e tabelas verificadas");
   } catch (e) {
@@ -101,11 +91,7 @@ export async function createUserDb(user: any) {
 
 export async function createSessionDb(token: string, userId: string, expiresAt: number) {
   if (!pool) return;
-  try {
-    await pool.query(`INSERT INTO sessoes (id, conta_id, token, expira_em) VALUES (gen_random_uuid(), $2, $1, to_timestamp($3 / 1000.0))`, [token, userId, expiresAt]);
-  } catch (e) {
-    console.error("Erro ao salvar sessão:", e);
-  }
+  await pool.query(`INSERT INTO sessoes (token, user_id, expires_at) VALUES ($1,$2,$3) ON CONFLICT (token) DO UPDATE SET expires_at = $3`, [token, userId, expiresAt]);
 }
 
 export async function getSessionDb(token: string) {
