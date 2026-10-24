@@ -394,21 +394,44 @@ function AdminShell({ user, onLogout, notify }: { user: User; onLogout: () => vo
 }
 
 function AppContent() {
-  const [user, setUser] = useState<User | null>(() => {
-    try {
-      const saved = localStorage.getItem(TOKEN_KEY) ? JSON.parse(localStorage.getItem(USER_KEY) || 'null') as User | null : null;
-      if (saved?.mode !== 'admin') { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(USER_KEY); return null; }
-      return saved;
-    } catch { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(USER_KEY); return null; }
-  });
-  const [toast, setToast] = useState<ToastState>(null);
-  const [authNotice, setAuthNotice] = useState('');
-  const [location, setLocation] = useLocation();
-  const queryClient = useQueryClient();
-  const logout = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(USER_KEY); setUser(null);
-    queryClient.clear(); setAuthNotice('Sua sessão terminou. Entre novamente para continuar.'); setLocation('/signin');
-  }, [queryClient, setLocation]);
+const [user, setUser] = useState<User | null>(() => {
+  try {
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (!token) return null;
+    const savedRaw = localStorage.getItem(USER_KEY);
+    if (!savedRaw) {
+      return null;
+    }
+    const saved = JSON.parse(savedRaw) as User | null;
+    if (saved && saved.mode !== 'admin') {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+      return null;
+    }
+    return saved;
+  } catch {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    return null;
+  }
+});
+
+const logout = useCallback(() => {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (token) {
+    fetch(`${import.meta.env.VITE_API_URL || 'https://kdtaxi-api.onrender.com/api'}/logout`, { 
+      method: 'POST', 
+      headers: { Authorization: `Bearer ${token}` } 
+    }).catch(() => {});
+  }
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+  setUser(null);
+  queryClient.clear();
+  setAuthNotice('Sua sessão terminou. Entre novamente para continuar.');
+  setLocation('/signin');
+}, [queryClient, setLocation]);
+
   const notify = useCallback((message: string, kind: 'success' | 'error' = 'success') => setToast({ message, kind }), []);
   useEffect(() => {
     const handleAuthExpired = () => { setAuthNotice('Sua sessão expirou ou não tem permissão. Entre novamente.'); logout(); };
