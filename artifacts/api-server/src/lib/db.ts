@@ -24,13 +24,40 @@ export async function initDb() {
       ALTER TABLE contas ADD COLUMN IF NOT EXISTS ride_count INT DEFAULT 0;
       ALTER TABLE contas ADD COLUMN IF NOT EXISTS password_hash TEXT;
     `);
+    // Ajusta tabela sessoes existente (que tem id, conta_id, token, expira_em) - adiciona colunas faltantes e garante compatibilidade
     await pool.query(`
       CREATE TABLE IF NOT EXISTS sessoes (
-        token TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        expires_at BIGINT NOT NULL
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        conta_id uuid,
+        token text NOT NULL UNIQUE,
+        expira_em timestamp with time zone,
+        conta text
       );
     `);
+    await pool.query(`ALTER TABLE sessoes ADD COLUMN IF NOT EXISTS conta_id uuid;`);
+    await pool.query(`ALTER TABLE sessoes ADD COLUMN IF NOT EXISTS token text;`);
+    await pool.query(`ALTER TABLE sessoes ADD COLUMN IF NOT EXISTS expira_em timestamp with time zone;`);
+    await pool.query(`ALTER TABLE sessoes ADD COLUMN IF NOT EXISTS expira_em_timestamptz timestamp with time zone;`);
+    // Cria tabela corridas se não existir
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS corridas (
+        id uuid PRIMARY KEY,
+        client_id uuid,
+        client_name text,
+        client_phone text,
+        origin text,
+        destination text,
+        vehicle_type text,
+        status text,
+        driver_id uuid,
+        price double precision,
+        payment text,
+        created_at timestamp with time zone DEFAULT NOW(),
+        accepted_at timestamp with time zone,
+        finished_at timestamp with time zone
+      );
+    `);
+    // ID fixo UUID válido para admin
     const adminId = '00000000-0000-0000-0000-000000000001';
     const adminExists = await pool.query(`SELECT id FROM contas WHERE phone = 'admin' OR email = 'admin' LIMIT 1`);
     if (adminExists.rows.length === 0) {
@@ -74,7 +101,11 @@ export async function createUserDb(user: any) {
 
 export async function createSessionDb(token: string, userId: string, expiresAt: number) {
   if (!pool) return;
-  await pool.query(`INSERT INTO sessoes (token, user_id, expires_at) VALUES ($1,$2,$3) ON CONFLICT (token) DO UPDATE SET expires_at = $3`, [token, userId, expiresAt]);
+  try {
+    await pool.query(`INSERT INTO sessoes (id, conta_id, token, expira_em) VALUES (gen_random_uuid(), $2, $1, to_timestamp($3 / 1000.0)) ON CONFLICT (token) DO UPDATE SET expira_em = to_timestamp($3 / 1000.0), conta_id = $2`, [token, userId, expiresAt]);
+  } catch (e) {
+    console.error("Erro ao salvar sessão:", e);
+  }
 }
 
 export async function getSessionDb(token: string) {

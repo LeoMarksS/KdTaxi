@@ -213,9 +213,12 @@ async function loadUsersFromNeon() {
 async function loadSessionsFromNeon() {
   if (!pool) return;
   try {
-    const res = await pool.query(`SELECT * FROM sessoes WHERE expires_at > $1`, [Date.now()]);
+    const res = await pool.query(`SELECT token, conta_id, expira_em FROM sessoes WHERE expira_em > NOW()`);
     for (const row of res.rows) {
-      sessions.set(row.token, { userId: row.user_id, expiresAt: Number(row.expires_at) });
+      const expiresAt = row.expira_em ? new Date(row.expira_em).getTime() : Date.now() + 7*24*60*60*1000;
+      if (row.token && row.conta_id) {
+        sessions.set(row.token, { userId: row.conta_id, expiresAt });
+      }
     }
     console.log(`✅ ${res.rows.length} sessões carregadas do Neon para memória`);
   } catch (e) {
