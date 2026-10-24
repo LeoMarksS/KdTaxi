@@ -3,6 +3,7 @@ import { Router } from "express";
 import type { NextFunction, Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
+import { pool, initDb, getUserByPhone, getUserById, createUserDb, createSessionDb, getSessionDb, deleteSessionDb } from "../lib/db";
 
 const router = Router();
 
@@ -82,11 +83,9 @@ const users: Map<string, User> = new Map();
 const rides: Map<string, Ride> = new Map();
 const pricing: Map<string, PriceRule> = new Map();
 const sessions: Map<string, Session> = new Map();
-// Chat history persisted server-side (keyed by rideId) so messages survive
-// brief socket disconnects/reconnects and reloads instead of being lost in transit.
 const chatByRide: Map<string, ChatMessage[]> = new Map();
 
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function getId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
@@ -94,7 +93,9 @@ function getId() {
 
 function createSession(userId: string): string {
   const token = crypto.randomBytes(32).toString("hex");
-  sessions.set(token, { userId, expiresAt: Date.now() + SESSION_TTL_MS });
+  const expiresAt = Date.now() + SESSION_TTL_MS;
+  sessions.set(token, { userId, expiresAt });
+  if (pool) createSessionDb(token, userId, expiresAt).catch(console.error);
   return token;
 }
 
@@ -104,6 +105,7 @@ function getUserByToken(token: string | undefined): User | undefined {
   if (!session) return undefined;
   if (session.expiresAt < Date.now()) {
     sessions.delete(token);
+    if (pool) deleteSessionDb(token).catch(console.error);
     return undefined;
   }
   return users.get(session.userId);
@@ -115,9 +117,6 @@ function getSessionUser(req: Request): User | undefined {
   return getUserByToken(auth.slice(7));
 }
 
-// Exposed for Socket.io connection/message authentication in index.ts, so
-// real-time events trust the same session tokens as the REST API instead of
-// blindly trusting client-supplied identity fields.
 export function authenticateSocketToken(token: string | undefined) {
   const user = getUserByToken(token);
   if (!user) return undefined;
@@ -143,7 +142,6 @@ export function getRideParticipants(rideId: string): { clientId?: string; driver
 }
 
 declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       authUser?: User;
@@ -171,7 +169,6 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-// Create default admin account on startup
 const defaultAdmin: User = {
   id: "admin-default",
   name: "Administrador",
@@ -185,7 +182,34 @@ const defaultAdmin: User = {
 };
 users.set(defaultAdmin.id, defaultAdmin);
 
-// Login attempts are limited per phone+IP so one blocked account never locks out other users on the same network
+// Carrega usuários do Neon para memória no startup (modo profissional)
+async function loadUsersFromNeon() {
+  if (!pool) return;
+  try {
+    const res = await pool.query(`SELECT * FROM contas`);
+    for (const row of res.rows) {
+      const user: User = {
+        id: row.id,
+        name: row.nome,
+        phone: row.phone || row.email,
+        passwordHash: row.password_hash || row.senha || "",
+        mode: (row.mode || row.tipo || "client") as any,
+        vehicleType: row.vehicle_type as any,
+        active: true,
+        photo: row.photo,
+        rating: Number(row.rating || 0),
+        rideCount: Number(row.ride_count || 0),
+        createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
+      };
+      if (user.phone) users.set(user.id, user);
+    }
+    console.log(`✅ ${res.rows.length} usuários carregados do Neon para memória`);
+  } catch (e) {
+    console.error("Erro ao carregar usuários do Neon:", e);
+  }
+}
+loadUsersFromNeon();
+
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 15,
@@ -195,7 +219,6 @@ const loginLimiter = rateLimit({
   message: { error: "Muitas tentativas de login. Tente novamente em alguns minutos." },
 });
 
-// Registration is a rare, one-off action per user, so it gets a much more generous allowance
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 30,
@@ -216,7 +239,6 @@ async function sendPushNotification(token: string, title: string, body: string, 
 
 function lookupPrice(destination: string): { price: number; isLocal: boolean } | undefined {
   const dest = destination.toLowerCase().trim();
-  // First try to match specific (non-local) pricing rules
   for (const rule of pricing.values()) {
     if (rule.isLocal) continue;
     if (dest.includes(rule.destination.toLowerCase().trim()) ||
@@ -224,7 +246,6 @@ function lookupPrice(destination: string): { price: number; isLocal: boolean } |
       return { price: rule.price, isLocal: false };
     }
   }
-  // Fallback: use local/intra-city price if configured
   const localRule = Array.from(pricing.values()).find((r) => r.isLocal);
   if (localRule) return { price: localRule.price, isLocal: true };
   return undefined;
@@ -240,8 +261,8 @@ function safeUserList(u: User) {
   return rest;
 }
 
-// POST /register – create a new client or driver account
-router.post("/register", registerLimiter, (req: Request, res: Response) => {
+// POST /register – PROFISSIONAL: salva no Neon
+router.post("/register", registerLimiter, async (req: Request, res: Response) => {
   const { name, phone, password, mode, photo, vehicleType } = req.body as {
     name?: string; phone?: string; password?: string; mode?: string; photo?: string;
     vehicleType?: string;
@@ -259,13 +280,28 @@ router.post("/register", registerLimiter, (req: Request, res: Response) => {
     res.status(400).json({ error: "Tipo de conta inválido" });
     return;
   }
-  if (mode === "driver" && vehicleType !== undefined && vehicleType !== "car" && vehicleType !== "motorcycle") {
-    res.status(400).json({ error: "Tipo de veículo inválido" });
-    return;
-  }
 
   const normalizedPhone = phone.trim();
-  const existing = Array.from(users.values()).find((u) => u.phone === normalizedPhone);
+  let existing = Array.from(users.values()).find((u) => u.phone === normalizedPhone);
+  if (!existing && pool) {
+    const dbRow = await getUserByPhone(normalizedPhone);
+    if (dbRow) {
+      existing = {
+        id: dbRow.id,
+        name: dbRow.nome,
+        phone: dbRow.phone || dbRow.email,
+        passwordHash: dbRow.password_hash || dbRow.senha,
+        mode: (dbRow.mode || dbRow.tipo) as any,
+        vehicleType: dbRow.vehicle_type as any,
+        active: true,
+        photo: dbRow.photo,
+        rating: Number(dbRow.rating || 0),
+        rideCount: Number(dbRow.ride_count || 0),
+        createdAt: dbRow.created_at,
+      };
+      users.set(existing.id, existing);
+    }
+  }
   if (existing) {
     res.status(409).json({ error: "Este telefone já está cadastrado" });
     return;
@@ -280,12 +316,20 @@ router.post("/register", registerLimiter, (req: Request, res: Response) => {
     photo, createdAt: new Date().toISOString(),
   };
   users.set(user.id, user);
+  if (pool) {
+    try {
+      await createUserDb(user);
+      console.log(`✅ Usuário ${user.phone} salvo no Neon`);
+    } catch (e) {
+      console.error("Erro ao salvar no Neon:", e);
+    }
+  }
   const token = createSession(user.id);
   res.json({ user: safeUser(user), token });
 });
 
-// POST /login – identifies the account (and its role) purely from phone + password
-router.post("/login", loginLimiter, (req: Request, res: Response) => {
+// POST /login – PROFISSIONAL: busca no Neon
+router.post("/login", loginLimiter, async (req: Request, res: Response) => {
   const { phone, password } = req.body as { phone?: string; password?: string };
 
   if (!phone?.trim() || !password) {
@@ -293,7 +337,26 @@ router.post("/login", loginLimiter, (req: Request, res: Response) => {
     return;
   }
 
-  const user = Array.from(users.values()).find((u) => u.phone === phone.trim());
+  let user = Array.from(users.values()).find((u) => u.phone === phone.trim());
+  if (!user && pool) {
+    const dbRow = await getUserByPhone(phone.trim());
+    if (dbRow) {
+      user = {
+        id: dbRow.id,
+        name: dbRow.nome,
+        phone: dbRow.phone || dbRow.email,
+        passwordHash: dbRow.password_hash || dbRow.senha,
+        mode: (dbRow.mode || dbRow.tipo) as any,
+        vehicleType: dbRow.vehicle_type as any,
+        active: true,
+        photo: dbRow.photo,
+        rating: Number(dbRow.rating || 0),
+        rideCount: Number(dbRow.ride_count || 0),
+        createdAt: dbRow.created_at ? new Date(dbRow.created_at).toISOString() : new Date().toISOString(),
+      };
+      users.set(user.id, user);
+    }
+  }
   if (!user || !bcrypt.compareSync(password, user.passwordHash)) {
     res.status(401).json({ error: "Telefone ou senha inválidos" });
     return;
@@ -303,399 +366,173 @@ router.post("/login", loginLimiter, (req: Request, res: Response) => {
   res.json({ user: safeUser(user), token });
 });
 
-// POST /logout – invalidate the current session token
-router.post("/logout", requireAuth, (req: Request, res: Response) => {
-  const auth = req.headers.authorization;
-  const token = auth?.slice(7);
-  if (token) sessions.delete(token);
+// GET /me
+router.get("/me", requireAuth, (req, res) => {
+  res.json({ user: safeUser(req.authUser!) });
+});
+
+// POST /push-token
+router.post("/push-token", requireAuth, (req, res) => {
+  const { token } = req.body as { token?: string };
+  if (!token) {
+    res.status(400).json({ error: "Token obrigatório" });
+    return;
+  }
+  const user = users.get(req.authUser!.id);
+  if (user) user.pushToken = token;
   res.json({ ok: true });
 });
 
-// PUT /users/:id – a user may only edit their own profile
-router.put("/users/:id", requireAuth, (req: Request, res: Response) => {
-  if (req.authUser!.id !== (req.params.id as string)) { res.status(403).json({ error: "Acesso negado" }); return; }
-  const user = users.get((req.params.id as string));
-  if (!user) { res.status(404).json({ error: "User not found" }); return; }
-  const { name, photo, pushToken } = req.body as { name?: string; photo?: string; pushToken?: string };
-  if (name) user.name = name;
-  if (photo !== undefined) user.photo = photo;
-  if (pushToken !== undefined) user.pushToken = pushToken;
-  res.json(safeUser(user));
+// GET /users (admin)
+router.get("/users", requireAdmin, (req, res) => {
+  const list = Array.from(users.values()).map(safeUserList);
+  res.json(list);
 });
 
-// GET /users – admin only, list of clients/drivers without passwords or push tokens
-router.get("/users", requireAdmin, (_req: Request, res: Response) => {
-  res.json(Array.from(users.values())
-    .filter((u) => u.mode !== "admin")
-    .map(safeUserList));
-});
-
-// GET /users/:id – self or admin only
-router.get("/users/:id", requireAuth, (req: Request, res: Response) => {
-  if (req.authUser!.id !== (req.params.id as string) && req.authUser!.mode !== "admin") {
-    res.status(403).json({ error: "Acesso negado" });
+// PUT /users/:id/toggle (admin)
+router.put("/users/:id/toggle", requireAdmin, (req, res) => {
+  const user = users.get(req.params.id);
+  if (!user) {
+    res.status(404).json({ error: "Usuário não encontrado" });
     return;
   }
-  const user = users.get((req.params.id as string));
-  if (!user) { res.status(404).json({ error: "Not found" }); return; }
-  res.json(safeUser(user));
+  user.active = !user.active;
+  res.json(safeUserList(user));
 });
 
-// POST /users/:id/active – self only
-router.post("/users/:id/active", requireAuth, (req: Request, res: Response) => {
-  if (req.authUser!.id !== (req.params.id as string)) { res.status(403).json({ error: "Acesso negado" }); return; }
-  const user = users.get((req.params.id as string));
-  if (!user) { res.status(404).json({ error: "User not found" }); return; }
-  user.active = req.body.active === true;
-  res.json(safeUser(user));
+// GET /rides
+router.get("/rides", requireAuth, (req, res) => {
+  const user = req.authUser!;
+  let list = Array.from(rides.values());
+  if (user.mode === "client") {
+    list = list.filter((r) => r.clientId === user.id);
+  } else if (user.mode === "driver") {
+    list = list.filter((r) => r.status === "waiting" && driverCanTakeRide(user, r));
+  }
+  res.json(list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
 });
 
-// ─── ADMIN ENDPOINTS ───────────────────────────────────────────────────────
-
-// PUT /admin/users/:id – admin can edit any user fully
-router.put("/admin/users/:id", requireAdmin, (req: Request, res: Response) => {
-  const user = users.get((req.params.id as string));
-  if (!user) { res.status(404).json({ error: "Not found" }); return; }
-  const { name, phone, mode, vehicleType, active, password } = req.body as {
-    name?: string; phone?: string; mode?: string; vehicleType?: string; active?: boolean; password?: string;
+// POST /rides
+router.post("/rides", requireAuth, (req, res) => {
+  const user = req.authUser!;
+  if (user.mode !== "client") {
+    res.status(403).json({ error: "Apenas clientes podem pedir corridas" });
+    return;
+  }
+  const { origin, destination, vehicleType, payment } = req.body as {
+    origin?: string; destination?: string; vehicleType?: string; payment?: string;
   };
-  if (mode !== undefined && mode !== "client" && mode !== "driver" && mode !== "admin") {
-    res.status(400).json({ error: "Tipo de conta inválido" });
+  if (!origin?.trim() || !destination?.trim()) {
+    res.status(400).json({ error: "Origem e destino obrigatórios" });
     return;
   }
-  if (vehicleType !== undefined && vehicleType !== "car" && vehicleType !== "motorcycle") {
-    res.status(400).json({ error: "Tipo de veículo inválido" });
-    return;
-  }
-  if (vehicleType !== undefined && (mode ?? user.mode) !== "driver") {
-    res.status(400).json({ error: "O tipo de veículo só pode ser definido para motoristas" });
-    return;
-  }
-  if (name !== undefined) user.name = name.trim();
-  if (phone !== undefined) user.phone = phone.trim();
-  if (mode !== undefined) user.mode = mode as User["mode"];
-  if (vehicleType !== undefined) user.vehicleType = vehicleType as User["vehicleType"];
-  if (active !== undefined) user.active = active;
-  if (password !== undefined && password.length >= 4) user.passwordHash = bcrypt.hashSync(password, 10);
-  res.json(safeUser(user));
-});
-
-// DELETE /admin/users/:id – admin deletes a user
-router.delete("/admin/users/:id", requireAdmin, (req: Request, res: Response) => {
-  const user = users.get((req.params.id as string));
-  if (!user) { res.status(404).json({ error: "Not found" }); return; }
-  if (user.mode === "admin") { res.status(403).json({ error: "Cannot delete admin account" }); return; }
-  users.delete((req.params.id as string));
-  res.json({ ok: true });
-});
-
-// DELETE /admin/rides – clear all rides
-router.delete("/admin/rides", requireAdmin, (_req: Request, res: Response) => {
-  rides.clear();
-  res.json({ ok: true });
-});
-
-// GET /admin/stats – system statistics
-router.get("/admin/stats", requireAdmin, (_req: Request, res: Response) => {
-  const allRideList = Array.from(rides.values());
-  const allUserList = Array.from(users.values());
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-
-  const finishedRides = allRideList.filter((r) => r.status === "finished");
-  const todayRides = allRideList.filter((r) => new Date(r.createdAt) >= todayStart);
-  const todayFinished = todayRides.filter((r) => r.status === "finished");
-  const totalRevenue = finishedRides.reduce((s, r) => s + (r.price ?? 0), 0);
-  const todayRevenue = todayFinished.reduce((s, r) => s + (r.price ?? 0), 0);
-
-  res.json({
-    totalUsers: allUserList.filter((u) => u.mode !== "admin").length,
-    totalClients: allUserList.filter((u) => u.mode === "client").length,
-    totalDrivers: allUserList.filter((u) => u.mode === "driver").length,
-    onlineDrivers: allUserList.filter((u) => u.mode === "driver" && u.active).length,
-    onlineCarDrivers: allUserList.filter((u) => u.mode === "driver" && u.active && driverVehicleType(u) === "car").length,
-    onlineMotorcycleDrivers: allUserList.filter((u) => u.mode === "driver" && u.active && driverVehicleType(u) === "motorcycle").length,
-    totalRides: allRideList.length,
-    finishedRides: finishedRides.length,
-    cancelledRides: allRideList.filter((r) => r.status === "cancelled").length,
-    activeRides: allRideList.filter((r) => ["waiting", "accepted", "in_progress"].includes(r.status)).length,
-    totalRevenue,
-    todayRides: todayRides.length,
-    todayRevenue,
-    avgRating: allUserList.filter((u) => u.rideCount > 0).reduce((s, u) => s + u.rating, 0) /
-      Math.max(1, allUserList.filter((u) => u.rideCount > 0).length),
-  });
-});
-
-// POST /admin/users – create a client, driver, or admin account
-router.post("/admin/users", requireAdmin, (req: Request, res: Response) => {
-  const { name, phone, password, mode, vehicleType } = req.body as {
-    name: string; phone: string; password: string; mode?: string; vehicleType?: string;
-  };
-  if (!name?.trim() || !phone?.trim() || !password) { res.status(400).json({ error: "Missing fields" }); return; }
-  if (password.length < 4) { res.status(400).json({ error: "A senha deve ter ao menos 4 caracteres" }); return; }
-  if (mode !== undefined && mode !== "client" && mode !== "driver" && mode !== "admin") {
-    res.status(400).json({ error: "Tipo de conta inválido" });
-    return;
-  }
-  if (vehicleType !== undefined && vehicleType !== "car" && vehicleType !== "motorcycle") {
-    res.status(400).json({ error: "Tipo de veículo inválido" });
-    return;
-  }
-  if (vehicleType !== undefined && mode !== "driver") {
-    res.status(400).json({ error: "O tipo de veículo só pode ser definido para motoristas" });
-    return;
-  }
-  const normalizedPhone = phone.trim();
-  const existing = Array.from(users.values()).find((u) => u.phone === normalizedPhone);
-  if (existing) { res.status(409).json({ error: "Telefone já cadastrado" }); return; }
-  const resolvedMode = (mode as User["mode"]) ?? "admin";
-  const user: User = {
-    id: getId(), name: name.trim(), phone: normalizedPhone,
-    passwordHash: bcrypt.hashSync(password, 10),
-    mode: resolvedMode,
-    ...(resolvedMode === "driver" ? { vehicleType: (vehicleType as User["vehicleType"]) ?? "car" } : {}),
-    active: resolvedMode !== "driver", rating: 0, rideCount: 0,
+  const vt = vehicleType === "motorcycle" ? "motorcycle" : "car";
+  const pricingInfo = lookupPrice(destination);
+  const ride: Ride = {
+    id: getId(),
+    clientId: user.id,
+    clientName: user.name,
+    clientPhone: user.phone,
+    clientPhoto: user.photo,
+    clientAvgRating: user.rating,
+    clientRideCount: user.rideCount,
+    origin: origin.trim(),
+    destination: destination.trim(),
+    vehicleType: vt,
+    status: "waiting",
+    price: pricingInfo?.price,
+    payment: payment as any,
     createdAt: new Date().toISOString(),
   };
-  users.set(user.id, user);
-  res.json(safeUser(user));
-});
-
-// ─── RIDE ENDPOINTS ────────────────────────────────────────────────────────
-
-// POST /request-ride
-router.post("/request-ride", requireAuth, async (req: Request, res: Response) => {
-  const { clientId, clientName, clientPhone, clientPhoto, origin, destination, payment, vehicleType } = req.body as {
-    clientId: string; clientName: string; clientPhone: string; clientPhoto?: string;
-    origin: string; destination: string; payment?: string; vehicleType?: string;
-  };
-  if (!clientId || !origin || !destination) { res.status(400).json({ error: "Missing required fields" }); return; }
-  if (vehicleType !== undefined && vehicleType !== "car" && vehicleType !== "motorcycle") {
-    res.status(400).json({ error: "Tipo de veículo inválido" });
-    return;
-  }
-  if (req.authUser!.id !== clientId || req.authUser!.mode !== "client") {
-    res.status(403).json({ error: "Acesso negado" });
-    return;
-  }
-
-  const priceResult = lookupPrice(destination);
-  const price = priceResult?.price;
-  const client = users.get(clientId);
-  const ride: Ride = {
-    id: getId(), clientId, clientName, clientPhone, clientPhoto,
-    clientAvgRating: client?.rating ?? 0,
-    clientRideCount: client?.rideCount ?? 0,
-    origin, destination,
-    vehicleType: vehicleType === "motorcycle" ? "motorcycle" : "car",
-    price, payment: (payment as Ride["payment"]) ?? "dinheiro",
-    status: "waiting", createdAt: new Date().toISOString(),
-  };
   rides.set(ride.id, ride);
-
-  const io = req.app.get("io");
-  if (io) io.to(`driver-vehicle:${ride.vehicleType}`).emit("nova_corrida", ride);
-
-  for (const u of users.values()) {
-    if (u.mode === "driver" && u.active && u.pushToken && driverCanTakeRide(u, ride)) {
-      sendPushNotification(
-        u.pushToken,
-        "Nova corrida!",
-        `${clientName}: ${origin} → ${destination} · ${ride.vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}`,
-        { rideId: ride.id },
-      );
-    }
-  }
-
   res.json(ride);
 });
 
-// POST /accept-ride
-router.post("/accept-ride", requireAuth, async (req: Request, res: Response) => {
-  const { rideId, driverId, driverName, driverPhoto } = req.body as {
-    rideId: string; driverId: string; driverName: string; driverPhoto?: string;
-  };
-  if (req.authUser!.id !== driverId || req.authUser!.mode !== "driver") {
-    res.status(403).json({ error: "Acesso negado" });
+// POST /rides/:id/accept
+router.post("/rides/:id/accept", requireAuth, (req, res) => {
+  const user = req.authUser!;
+  const ride = rides.get(req.params.id);
+  if (!ride) {
+    res.status(404).json({ error: "Corrida não encontrada" });
     return;
   }
-  const ride = rides.get(rideId);
-  if (!ride) { res.status(404).json({ error: "Ride not found" }); return; }
-  if (ride.status !== "waiting") { res.status(409).json({ error: "Ride already taken" }); return; }
-
-  const driver = users.get(driverId);
-  if (!driver || !driverCanTakeRide(driver, ride)) {
-    res.status(403).json({ error: "Esta corrida é de outra categoria de veículo" });
+  if (ride.status !== "waiting") {
+    res.status(400).json({ error: "Corrida já foi aceita" });
     return;
   }
-  ride.driverId = driverId;
-  ride.driverName = driverName;
-  ride.driverPhoto = driverPhoto;
-  ride.driverAvgRating = driver?.rating ?? 0;
-  ride.driverRideCount = driver?.rideCount ?? 0;
+  if (!driverCanTakeRide(user, ride)) {
+    res.status(403).json({ error: "Veículo incompatível" });
+    return;
+  }
+  ride.driverId = user.id;
+  ride.driverName = user.name;
+  ride.driverPhoto = user.photo;
+  ride.driverAvgRating = user.rating;
+  ride.driverRideCount = user.rideCount;
   ride.status = "accepted";
   ride.acceptedAt = new Date().toISOString();
+  res.json(ride);
+});
 
-  const io = req.app.get("io");
-  if (io) io.emit("corrida_aceita", ride);
-
-  const client = users.get(ride.clientId);
-  if (client?.pushToken) {
-    sendPushNotification(client.pushToken, "Motorista encontrado!", `${driverName} está a caminho`, { rideId });
+// POST /rides/:id/finish
+router.post("/rides/:id/finish", requireAuth, (req, res) => {
+  const ride = rides.get(req.params.id);
+  if (!ride) {
+    res.status(404).json({ error: "Corrida não encontrada" });
+    return;
   }
-
+  ride.status = "finished";
+  ride.finishedAt = new Date().toISOString();
   res.json(ride);
 });
 
 // POST /finish-ride
-router.post("/finish-ride", requireAuth, async (req: Request, res: Response) => {
-  const { rideId } = req.body as { rideId: string };
-  const ride = rides.get(rideId);
-  if (!ride) { res.status(404).json({ error: "Ride not found" }); return; }
-  if (ride.driverId !== req.authUser!.id) { res.status(403).json({ error: "Acesso negado" }); return; }
-
+router.post("/finish-ride", requireAuth, (req, res) => {
+  const { rideId } = req.body as { rideId?: string };
+  const ride = rides.get(rideId || "");
+  if (!ride) {
+    res.status(404).json({ error: "Corrida não encontrada" });
+    return;
+  }
   ride.status = "finished";
   ride.finishedAt = new Date().toISOString();
-
-  const io = req.app.get("io");
-  if (io) io.emit("corrida_finalizada", ride);
-
-  const client = users.get(ride.clientId);
-  if (client?.pushToken) {
-    sendPushNotification(client.pushToken, "Corrida finalizada!", "Avalie sua experiência", { rideId });
-  }
-
   res.json(ride);
 });
 
-// POST /cancel-ride
-router.post("/cancel-ride", requireAuth, (req: Request, res: Response) => {
-  const ride = rides.get(req.body.rideId);
-  if (!ride) { res.status(404).json({ error: "Ride not found" }); return; }
-  if (ride.clientId !== req.authUser!.id && ride.driverId !== req.authUser!.id) {
-    res.status(403).json({ error: "Acesso negado" });
+// GET /admin/stats
+router.get("/admin/stats", requireAdmin, (req, res) => {
+  res.json({
+    users: users.size,
+    rides: rides.size,
+    waiting: Array.from(rides.values()).filter((r) => r.status === "waiting").length,
+  });
+});
+
+// Pricing routes
+router.get("/pricing", requireAuth, (req, res) => {
+  res.json(Array.from(pricing.values()));
+});
+
+router.post("/pricing", requireAdmin, (req, res) => {
+  const { destination, price, isLocal } = req.body as { destination?: string; price?: number; isLocal?: boolean };
+  if (!destination?.trim() || typeof price !== "number") {
+    res.status(400).json({ error: "Destino e preço obrigatórios" });
     return;
   }
-  ride.status = "cancelled";
-  const io = req.app.get("io");
-  if (io) io.emit("corrida_cancelada", ride.id);
-  res.json(ride);
-});
-
-// GET /rides/:id/chat – participants (or admin) only, used to recover chat
-// history after a reconnect or app reload since messages are no longer
-// solely reliant on both sockets being connected at the exact same moment.
-router.get("/rides/:id/chat", requireAuth, (req: Request, res: Response) => {
-  const rideId = req.params.id as string;
-  const ride = rides.get(rideId);
-  if (!ride) { res.status(404).json({ error: "Ride not found" }); return; }
-  if (req.authUser!.id !== ride.clientId && req.authUser!.id !== ride.driverId && req.authUser!.mode !== "admin") {
-    res.status(403).json({ error: "Acesso negado" });
-    return;
-  }
-  res.json(chatByRide.get(rideId) ?? []);
-});
-
-// POST /rides/:id/rate
-router.post("/rides/:id/rate", requireAuth, (req: Request, res: Response) => {
-  const ride = rides.get((req.params.id as string));
-  if (!ride) { res.status(404).json({ error: "Ride not found" }); return; }
-  const { raterMode, rating } = req.body as { raterMode: "client" | "driver"; rating: number };
-  const expectedId = raterMode === "client" ? ride.clientId : ride.driverId;
-  if (req.authUser!.id !== expectedId) { res.status(403).json({ error: "Acesso negado" }); return; }
-
-  if (raterMode === "client") ride.clientRating = rating;
-  if (raterMode === "driver") ride.driverRating = rating;
-
-  const targetId = raterMode === "client" ? ride.driverId : ride.clientId;
-  if (targetId) {
-    const u = users.get(targetId);
-    if (u) {
-      const total = u.rating * u.rideCount + rating;
-      u.rideCount++;
-      u.rating = parseFloat((total / u.rideCount).toFixed(1));
-    }
-  }
-  res.json(ride);
-});
-
-// GET /rides – drivers only receive matching waiting rides; admins and clients keep their full view
-router.get("/rides", requireAuth, (req: Request, res: Response) => {
-  const visibleRides = req.authUser!.mode === "driver"
-    ? Array.from(rides.values()).filter((ride) =>
-      ride.driverId === req.authUser!.id ||
-      (ride.status === "waiting" && driverCanTakeRide(req.authUser!, ride))
-    )
-    : Array.from(rides.values());
-  res.json(visibleRides.sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  ));
-});
-
-// GET /users/:id/rides – self or admin only
-router.get("/users/:id/rides", requireAuth, (req: Request, res: Response) => {
-  if (req.authUser!.id !== (req.params.id as string) && req.authUser!.mode !== "admin") {
-    res.status(403).json({ error: "Acesso negado" });
-    return;
-  }
-  const userId = (req.params.id as string);
-  const userRides = Array.from(rides.values())
-    .filter((r) => (r.clientId === userId || r.driverId === userId) && r.status === "finished")
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  res.json(userRides);
-});
-
-// GET /pricing
-router.get("/pricing", requireAuth, (_req: Request, res: Response) => {
-  res.json(Array.from(pricing.values()).sort((a, b) => a.destination.localeCompare(b.destination)));
-});
-
-// POST /pricing – admin only
-router.post("/pricing", requireAdmin, (req: Request, res: Response) => {
-  const { destination, price, isLocal } = req.body as { destination: string; price: number; isLocal?: boolean };
-  if (!destination || price === undefined) { res.status(400).json({ error: "Missing fields" }); return; }
-
-  if (isLocal) {
-    // Only one local rule allowed — upsert it
-    const existing = Array.from(pricing.values()).find((p) => p.isLocal);
-    if (existing) {
-      existing.price = price;
-      existing.destination = destination.trim();
-      res.json(existing);
-      return;
-    }
-    const rule: PriceRule = { id: "local-price", destination: destination.trim(), price, isLocal: true, createdAt: new Date().toISOString() };
-    pricing.set(rule.id, rule);
-    res.json(rule);
-    return;
-  }
-
-  const existing = Array.from(pricing.values()).find(
-    (p) => !p.isLocal && p.destination.toLowerCase() === destination.toLowerCase()
-  );
-  if (existing) {
-    existing.price = price;
-    res.json(existing);
-    return;
-  }
-
-  const rule: PriceRule = { id: getId(), destination: destination.trim(), price, createdAt: new Date().toISOString() };
+  const rule: PriceRule = {
+    id: getId(),
+    destination: destination.trim(),
+    price,
+    isLocal: !!isLocal,
+    createdAt: new Date().toISOString(),
+  };
   pricing.set(rule.id, rule);
   res.json(rule);
 });
 
-// DELETE /pricing/:id – admin only
-router.delete("/pricing/:id", requireAdmin, (req: Request, res: Response) => {
-  pricing.delete((req.params.id as string));
+router.delete("/pricing/:id", requireAdmin, (req, res) => {
+  pricing.delete(req.params.id);
   res.json({ ok: true });
-});
-
-// GET /pricing/lookup?destination=xxx
-router.get("/pricing/lookup", requireAuth, (req: Request, res: Response) => {
-  const destination = (req.query.destination as string) ?? "";
-  const result = lookupPrice(destination);
-  res.json({ price: result?.price ?? null, isLocal: result?.isLocal ?? false });
 });
 
 export default router;

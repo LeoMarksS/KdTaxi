@@ -2,6 +2,7 @@ import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import app from "./app";
 import { logger } from "./lib/logger";
+import { initDb } from "./lib/db";
 import {
   authenticateSocketToken,
   getRideParticipants,
@@ -24,6 +25,9 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
+// Inicializa Neon antes de subir o servidor
+await initDb();
+
 const httpServer = createServer(app);
 
 const io = new SocketIOServer(httpServer, {
@@ -34,13 +38,8 @@ const io = new SocketIOServer(httpServer, {
   },
 });
 
-// Store io on the app for use in routes
 app.set("io", io);
 
-// Authenticate every socket connection against the same session tokens used
-// by the REST API, instead of trusting whatever identity the client claims
-// in its query params. This also lets us join per-user rooms so events can
-// be targeted reliably rather than broadcast to every connected device.
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token as string | undefined;
   const user = authenticateSocketToken(token);
@@ -62,11 +61,7 @@ io.on("connection", (socket) => {
   };
   logger.info({ socketId: socket.id, userId: user.id, mode: user.mode }, "Socket connected");
 
-  // Personal room: lets the server target this exact user across all of
-  // their connected devices/tabs, and reconnects automatically re-join it.
   socket.join(`user:${user.id}`);
-  // Role room: lets driver-only broadcasts (e.g. new ride requests) reach
-  // every driver without needing every handler to enumerate connected sockets.
   socket.join(`role:${user.mode}`);
   if (user.mode === "driver") {
     socket.join(`driver-vehicle:${user.vehicleType === "motorcycle" ? "motorcycle" : "car"}`);
@@ -78,8 +73,6 @@ io.on("connection", (socket) => {
     if (!rideId || !text) return;
     if (!isRideParticipant(rideId, user.id)) return;
 
-    // Identity is derived from the authenticated socket, never trusted from
-    // the client payload, so a message can never be spoofed as someone else.
     const fullMsg: ChatMessage = {
       id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 11)}`,
       rideId,
@@ -106,6 +99,5 @@ httpServer.listen(port, (err?: Error) => {
     logger.error({ err }, "Error listening on port");
     process.exit(1);
   }
-
   logger.info({ port }, "Server listening with Socket.io");
 });
