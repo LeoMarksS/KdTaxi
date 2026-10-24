@@ -99,6 +99,47 @@ function createSession(userId: string): string {
   return token;
 }
 
+async function getUserByTokenAsync(token: string | undefined): Promise<User | undefined> {
+  if (!token) return undefined;
+  let session = sessions.get(token);
+  if (!session && pool) {
+    const dbSess = await getSessionDb(token).catch(() => null);
+    if (dbSess) {
+      const expiresAt = new Date(dbSess.expira_em).getTime();
+      if (expiresAt > Date.now()) {
+        session = { userId: dbSess.conta_id, expiresAt };
+        sessions.set(token, session);
+      }
+    }
+  }
+  if (!session) return undefined;
+  if (session.expiresAt < Date.now()) {
+    sessions.delete(token);
+    if (pool) deleteSessionDb(token).catch(console.error);
+    return undefined;
+  }
+  let user = users.get(session.userId);
+  if (!user && pool) {
+    const dbUser = await getUserById(session.userId).catch(() => null);
+    if (dbUser) {
+      user = {
+        id: dbUser.id,
+        name: dbUser.nome,
+        phone: dbUser.phone || dbUser.email,
+        passwordHash: dbUser.password_hash || dbUser.senha || "",
+        mode: (dbUser.mode || dbUser.tipo) as any,
+        vehicleType: dbUser.vehicle_type as any,
+        active: true,
+        photo: dbUser.photo,
+        rating: Number(dbUser.rating || 0),
+        rideCount: Number(dbUser.ride_count || 0),
+        createdAt: dbUser.created_at ? new Date(dbUser.created_at).toISOString() : new Date().toISOString(),
+      };
+      users.set(user.id, user);
+    }
+  }
+  return user;
+}
 function getUserByToken(token: string | undefined): User | undefined {
   if (!token) return undefined;
   const session = sessions.get(token);
@@ -109,6 +150,11 @@ function getUserByToken(token: string | undefined): User | undefined {
     return undefined;
   }
   return users.get(session.userId);
+}
+async function getSessionUserAsync(req: import("express").Request): Promise<User | undefined> {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) return undefined;
+  return await getUserByTokenAsync(auth.slice(7));
 }
 
 function getSessionUser(req: Request): User | undefined {
@@ -149,8 +195,8 @@ declare global {
   }
 }
 
-function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const user = getSessionUser(req);
+async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const user = await getSessionUserAsync(req);
   if (!user) {
     res.status(401).json({ error: "Não autenticado" });
     return;
@@ -159,8 +205,8 @@ function requireAuth(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  const user = getSessionUser(req);
+async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  const user = await getSessionUserAsync(req);
   if (!user || user.mode !== "admin") {
     res.status(403).json({ error: "Acesso negado" });
     return;
@@ -209,6 +255,22 @@ async function loadUsersFromNeon() {
   }
 }
 loadUsersFromNeon();
+async function loadSessionsFromNeon() {
+  if (!pool) return;
+  try {
+    const res = await pool.query(`SELECT token, conta_id, expira_em FROM sessoes WHERE expira_em > NOW()`);
+    for (const row of res.rows) {
+      const expiresAt = new Date(row.expira_em).getTime();
+      if (expiresAt > Date.now()) {
+        sessions.set(row.token, { userId: row.conta_id, expiresAt });
+      }
+    }
+    console.log(`✅ ${res.rows.length} sessões carregadas do Neon`);
+  } catch (e) {
+    console.error("Erro ao carregar sessões do Neon:", e);
+  }
+}
+loadSessionsFromNeon();
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
