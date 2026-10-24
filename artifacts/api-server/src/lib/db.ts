@@ -102,7 +102,7 @@ export async function createUserDb(user: any) {
 export async function createSessionDb(token: string, userId: string, expiresAt: number) {
   if (!pool) return;
   try {
-    await pool.query(`INSERT INTO sessoes (id, conta_id, token, expira_em) VALUES (gen_random_uuid(), $2, $1, to_timestamp($3 / 1000.0)) ON CONFLICT (token) DO UPDATE SET expira_em = to_timestamp($3 / 1000.0), conta_id = $2`, [token, userId, expiresAt]);
+    await pool.query(`INSERT INTO sessoes (id, conta_id, token, expira_em) VALUES (gen_random_uuid(), $2, $1, to_timestamp($3 / 1000.0))`, [token, userId, expiresAt]);
   } catch (e) {
     console.error("Erro ao salvar sessão:", e);
   }
