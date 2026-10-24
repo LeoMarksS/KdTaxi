@@ -64,5 +64,5 @@
     "expo-updates": "~57.0.26",
     "socket.io-client": "^4.8.3"
   },
-  "packageManager": "pnpm@11.9.0"
+  "packageManager": "pnpm@10.26.1"
 }

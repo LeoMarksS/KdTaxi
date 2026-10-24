@@ -7,20 +7,29 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "channel": "development"
+      "channel": "development",
+      "env": {
+        "NODE_VERSION": "20.19.4",
+        "PNPM_VERSION": "10.26.1"
+      }
     },
     "preview": {
       "distribution": "internal",
       "channel": "preview",
       "env": {
-        "NODE_VERSION": "22.11.0"
+        "NODE_VERSION": "20.19.4",
+        "PNPM_VERSION": "10.26.1",
+        "EXPO_PUBLIC_DOMAIN": "kdtaxi-api.onrender.com",
+        "EXPO_PUBLIC_API_URL": "https://kdtaxi-api.onrender.com/api",
+        "VITE_API_URL": "https://kdtaxi-api.onrender.com/api"
       }
     },
     "production": {
       "autoIncrement": true,
       "channel": "production",
       "env": {
-        "NODE_VERSION": "22.11.0"
+        "NODE_VERSION": "20.19.4",
+        "PNPM_VERSION": "10.26.1"
       }
     }
   },
