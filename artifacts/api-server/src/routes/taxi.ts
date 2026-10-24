@@ -170,7 +170,7 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
 }
 
 const defaultAdmin: User = {
-  id: "admin-default",
+  id: "00000000-0000-0000-0000-000000000001",
   name: "Administrador",
   phone: "admin",
   passwordHash: bcrypt.hashSync("admin123", 10),
