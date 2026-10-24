@@ -88,6 +88,7 @@ const chatByRide: Map<string, ChatMessage[]> = new Map();
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 function getId() {
+  // Usa UUID válido para coluna uuid no Neon
   return crypto.randomUUID();
 }
 
@@ -170,7 +171,7 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
 }
 
 const defaultAdmin: User = {
-  id: "admin-default",
+  id: "00000000-0000-0000-0000-000000000001",
   name: "Administrador",
   phone: "admin",
   passwordHash: bcrypt.hashSync("admin123", 10),
@@ -208,7 +209,53 @@ async function loadUsersFromNeon() {
     console.error("Erro ao carregar usuários do Neon:", e);
   }
 }
-loadUsersFromNeon();
+
+async function loadSessionsFromNeon() {
+  if (!pool) return;
+  try {
+    const res = await pool.query(`SELECT * FROM sessoes WHERE expires_at > $1`, [Date.now()]);
+    for (const row of res.rows) {
+      sessions.set(row.token, { userId: row.user_id, expiresAt: Number(row.expires_at) });
+    }
+    console.log(`✅ ${res.rows.length} sessões carregadas do Neon para memória`);
+  } catch (e) {
+    console.error("Erro ao carregar sessões do Neon:", e);
+  }
+}
+
+async function loadRidesFromNeon() {
+  if (!pool) return;
+  try {
+    const res = await pool.query(`SELECT * FROM corridas WHERE status != 'finished' AND status != 'cancelled' ORDER BY created_at DESC LIMIT 100`);
+    for (const row of res.rows) {
+      const ride: Ride = {
+        id: row.id,
+        clientId: row.client_id,
+        clientName: row.client_name,
+        clientPhone: row.client_phone,
+        origin: row.origin,
+        destination: row.destination,
+        vehicleType: (row.vehicle_type as any) || "car",
+        status: (row.status as any) || "waiting",
+        driverId: row.driver_id,
+        price: row.price ? Number(row.price) : undefined,
+        payment: row.payment as any,
+        createdAt: row.created_at,
+        acceptedAt: row.accepted_at,
+        finishedAt: row.finished_at,
+      };
+      rides.set(ride.id, ride);
+    }
+    console.log(`✅ ${res.rows.length} corridas ativas carregadas do Neon`);
+  } catch (e) {
+    console.error("Erro ao carregar corridas do Neon:", e);
+  }
+}
+
+loadUsersFromNeon().then(() => {
+  loadSessionsFromNeon();
+  loadRidesFromNeon();
+});
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -397,6 +444,9 @@ router.put("/users/:id/toggle", requireAdmin, (req, res) => {
     return;
   }
   user.active = !user.active;
+  if (pool) {
+    pool.query(`UPDATE contas SET active = $1 WHERE id = $2`, [user.active, user.id]).catch(console.error);
+  }
   res.json(safeUserList(user));
 });
 
@@ -445,6 +495,10 @@ router.post("/rides", requireAuth, (req, res) => {
     createdAt: new Date().toISOString(),
   };
   rides.set(ride.id, ride);
+  if (pool) {
+    pool.query(`INSERT INTO corridas (id, client_id, client_name, client_phone, origin, destination, vehicle_type, status, price, payment, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`,
+    [ride.id, ride.clientId, ride.clientName, ride.clientPhone, ride.origin, ride.destination, ride.vehicleType, ride.status, ride.price, ride.payment, ride.createdAt]).catch(console.error);
+  }
   res.json(ride);
 });
 
