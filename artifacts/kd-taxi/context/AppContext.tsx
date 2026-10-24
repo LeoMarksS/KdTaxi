@@ -107,6 +107,7 @@ export interface AdminStats {
 }
 
 interface AppContextValue {
+  isAuthLoading: boolean;
   user: User | null;
   setUser: (user: User | null) => void;
   updateProfile: (name: string, photo?: string) => Promise<void>;
@@ -208,6 +209,7 @@ function matchesDriverVehicle(user: User, ride: Ride): boolean {
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [user, setUserState] = useState<User | null>(null);
   const [token, setTokenState] = useState<string | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const tokenRef = useRef<string | null>(null);
   const [isDriverOnline, setDriverOnlineState] = useState(false);
   const [activeRide, setActiveRide] = useState<Ride | null>(null);
@@ -238,21 +240,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // Load persisted state
   useEffect(() => {
-    AsyncStorage.getItem("kd_user").then((data) => {
-      if (data) setUserState(JSON.parse(data) as User);
-    });
-    AsyncStorage.getItem("kd_token").then((data) => {
-      if (data) {
-        tokenRef.current = data;
-        setTokenState(data);
+    Promise.all([
+      AsyncStorage.getItem("kd_user"),
+      AsyncStorage.getItem("kd_token"),
+      AsyncStorage.getItem("kd_driver_online"),
+      AsyncStorage.getItem("kd_active_ride"),
+    ]).then(([userData, tokenData, driverOnline, activeRideData]) => {
+      if (userData) setUserState(JSON.parse(userData) as User);
+      if (tokenData) {
+        tokenRef.current = tokenData;
+        setTokenState(tokenData);
       }
-    });
-    AsyncStorage.getItem("kd_driver_online").then((data) => {
-      if (data === "true") setDriverOnlineState(true);
-    });
-    AsyncStorage.getItem("kd_active_ride").then((data) => {
-      if (data) setActiveRide(JSON.parse(data) as Ride);
-    });
+      if (driverOnline === "true") setDriverOnlineState(true);
+      if (activeRideData) setActiveRide(JSON.parse(activeRideData) as Ride);
+      setIsAuthLoading(false);
+    }).catch(() => setIsAuthLoading(false));
   }, []);
 
   const setToken = useCallback((t: string | null) => {
@@ -823,6 +825,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppContext.Provider value={{
+      isAuthLoading,
       user, setUser, updateProfile,
       isDriverOnline, setDriverOnline,
       activeRide, setActiveRide, activeRides,
