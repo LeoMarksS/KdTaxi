@@ -31,34 +31,17 @@ export async function initDb() {
         expires_at BIGINT NOT NULL
       );
     `);
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS corridas (
-        id TEXT PRIMARY KEY,
-        client_id TEXT,
-        client_name TEXT,
-        client_phone TEXT,
-        origin TEXT,
-        destination TEXT,
-        vehicle_type TEXT,
-        status TEXT,
-        driver_id TEXT,
-        price DOUBLE PRECISION,
-        payment TEXT,
-        created_at TEXT,
-        accepted_at TEXT,
-        finished_at TEXT
-      );
-    `);
+    const adminId = '00000000-0000-0000-0000-000000000001';
     const adminExists = await pool.query(`SELECT id FROM contas WHERE phone = 'admin' OR email = 'admin' LIMIT 1`);
     if (adminExists.rows.length === 0) {
       const bcrypt = await import("bcryptjs");
       const hash = bcrypt.hashSync("admin123", 10);
       await pool.query(`
         INSERT INTO contas (id, nome, email, phone, senha, password_hash, tipo, mode, active, rating, ride_count, created_at)
-        VALUES ('admin-default', 'Administrador', 'admin', 'admin', 'admin123', $1, 'admin', 'admin', true, 0, 0, NOW())
+        VALUES ($1, 'Administrador', 'admin', 'admin', 'admin123', $2, 'admin', 'admin', true, 0, 0, NOW())
         ON CONFLICT (id) DO NOTHING
-      `, [hash]);
-      console.log("Admin criado no Neon");
+      `, [adminId, hash]);
+      console.log("Admin criado no Neon com UUID", adminId);
     }
     console.log("✅ Neon conectado e tabelas verificadas");
   } catch (e) {
