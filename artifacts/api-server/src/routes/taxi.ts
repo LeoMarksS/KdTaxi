@@ -453,7 +453,7 @@ router.get("/users", requireAdmin, (req, res) => {
 
 // PUT /users/:id/toggle (admin)
 router.put("/users/:id/toggle", requireAdmin, (req, res) => {
-  const user = users.get(req.params.id);
+  const user = users.get(String(req.params.id));
   if (!user) {
     res.status(404).json({ error: "Usuário não encontrado" });
     return;
@@ -513,7 +513,7 @@ router.post("/rides", requireAuth, (req, res) => {
 // POST /rides/:id/accept
 router.post("/rides/:id/accept", requireAuth, (req, res) => {
   const user = req.authUser!;
-  const ride = rides.get(req.params.id);
+  const ride = rides.get(String(req.params.id));
   if (!ride) {
     res.status(404).json({ error: "Corrida não encontrada" });
     return;
@@ -538,7 +538,7 @@ router.post("/rides/:id/accept", requireAuth, (req, res) => {
 
 // POST /rides/:id/finish
 router.post("/rides/:id/finish", requireAuth, (req, res) => {
-  const ride = rides.get(req.params.id);
+  const ride = rides.get(String(req.params.id));
   if (!ride) {
     res.status(404).json({ error: "Corrida não encontrada" });
     return;
@@ -562,7 +562,7 @@ router.post("/finish-ride", requireAuth, (req, res) => {
 });
 
 router.post("/rides/:id/cancel", requireAuth, (req, res) => {
-  const ride = rides.get(req.params.id);
+  const ride = rides.get(String(req.params.id));
   if (!ride) {
     res.status(404).json({ error: "Corrida não encontrada" });
     return;
@@ -613,7 +613,7 @@ router.post("/pricing", requireAdmin, (req, res) => {
 });
 
 router.delete("/pricing/:id", requireAdmin, (req, res) => {
-  pricing.delete(req.params.id);
+  pricing.delete(String(req.params.id));
   res.json({ ok: true });
 });
 

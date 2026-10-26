@@ -394,6 +394,10 @@ function AdminShell({ user, onLogout, notify }: { user: User; onLogout: () => vo
 }
 
 function AppContent() {
+  const [location, setLocation] = useLocation();
+  const [authNotice, setAuthNotice] = useState('');
+  const [toast, setToast] = useState<ToastState>(null);
+
 const [user, setUser] = useState<User | null>(() => {
   try {
     const token = localStorage.getItem(TOKEN_KEY);
