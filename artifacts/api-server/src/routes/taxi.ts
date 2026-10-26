@@ -561,6 +561,26 @@ router.post("/finish-ride", requireAuth, (req, res) => {
   res.json(ride);
 });
 
+router.post("/rides/:id/cancel", requireAuth, (req, res) => {
+  const ride = rides.get(req.params.id);
+  if (!ride) {
+    res.status(404).json({ error: "Corrida não encontrada" });
+    return;
+  }
+  ride.status = "cancelled";
+  res.json(ride);
+});
+
+router.delete("/admin/rides", requireAdmin, (req, res) => {
+  const { id } = req.body as { id?: string };
+  if (id) {
+    rides.delete(id);
+  } else {
+    rides.clear();
+  }
+  res.json({ ok: true });
+});
+
 // GET /admin/stats
 router.get("/admin/stats", requireAdmin, (req, res) => {
   res.json({
