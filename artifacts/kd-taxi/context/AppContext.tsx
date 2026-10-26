@@ -592,7 +592,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     vehicleType: VehicleType = "car",
   ): Promise<Ride | null> => {
     if (!user) return null;
-    const res = await authFetch(`/request-ride`, {
+    const res = await authFetch(`/rides`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
