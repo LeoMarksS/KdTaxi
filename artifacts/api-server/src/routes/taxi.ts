@@ -591,6 +591,24 @@ router.get("/admin/stats", requireAdmin, (req, res) => {
 });
 
 // Pricing routes
+router.get("/pricing/lookup", requireAuth, (req, res) => {
+  const destination = String(req.query.destination ?? "").trim();
+
+  if (!destination) {
+    res.status(400).json({ error: "Destino obrigatório" });
+    return;
+  }
+
+  const result = lookupPrice(destination);
+
+  if (!result) {
+    res.json({ price: null, isLocal: false });
+    return;
+  }
+
+  res.json(result);
+});
+
 router.get("/pricing", requireAuth, (req, res) => {
   res.json(Array.from(pricing.values()));
 });
