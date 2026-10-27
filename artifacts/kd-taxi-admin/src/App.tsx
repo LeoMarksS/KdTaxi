@@ -19,7 +19,7 @@ import NotFound from '@/pages/not-found';
 
 const TOKEN_KEY = 'kd-taxi-admin-token';
 const USER_KEY = 'kd-taxi-admin-user';
-setAuthTokenGetter(() => localStorage.getItem(TOKEN_KEY));
+setAuthTokenGetter(() => sessionStorage.getItem(TOKEN_KEY));
 
 type PageName = 'overview' | 'users' | 'rides' | 'pricing';
 type ToastState = { message: string; kind?: 'error' | 'success' } | null;
@@ -335,7 +335,7 @@ function SignIn({ onSignedIn, authNotice }: { onSignedIn: (user: User, token: st
     const data = new FormData(event.currentTarget);
     login.mutate({ data: { phone: String(data.get('phone')).trim(), password: String(data.get('password')) } }, {
       onSuccess: (response) => {
-        if (response.user.mode !== 'admin') { localStorage.removeItem(TOKEN_KEY); setError('Esta conta não tem acesso à administração.'); return; }
+        if (response.user.mode !== 'admin') { sessionStorage.removeItem(TOKEN_KEY); setError('Esta conta não tem acesso à administração.'); return; }
         onSignedIn(response.user, response.token);
       },
       onError: () => setError('Não foi possível entrar. Confira o telefone e a senha e tente novamente.'),
@@ -394,65 +394,21 @@ function AdminShell({ user, onLogout, notify }: { user: User; onLogout: () => vo
 }
 
 function AppContent() {
-  const [location, setLocation] = useLocation();
-  const [authNotice, setAuthNotice] = useState('');
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const saved = sessionStorage.getItem(TOKEN_KEY) ? JSON.parse(sessionStorage.getItem(USER_KEY) || 'null') as User | null : null;
+      if (saved?.mode !== 'admin') { sessionStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(USER_KEY); return null; }
+      return saved;
+    } catch { sessionStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(USER_KEY); return null; }
+  });
   const [toast, setToast] = useState<ToastState>(null);
-
-const [user, setUser] = useState<User | null>(() => {
-  try {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (!token) return null;
-    const savedRaw = localStorage.getItem(USER_KEY);
-    if (!savedRaw) return null;
-    const saved = JSON.parse(savedRaw) as User | null;
-    if (saved && saved.mode && saved.mode !== 'admin') {
-      localStorage.removeItem(TOKEN_KEY);
-      localStorage.removeItem(USER_KEY);
-      return null;
-    }
-    return saved;
-  } catch {
-    return null;
-  }
-});
-
-// Restaura sessão se tem token mas sem user (fix CMD+R)
-useEffect(() => {
-  const token = localStorage.getItem(TOKEN_KEY);
-  if (token && !user) {
-    const apiUrl = (import.meta as any).env?.VITE_API_URL || 'https://kdtaxi-api.onrender.com/api';
-    fetch(`${apiUrl}/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.json())
-      .then(d => {
-        if (d.user) {
-          localStorage.setItem(USER_KEY, JSON.stringify(d.user));
-          setUser(d.user);
-        }
-      })
-      .catch(() => {
-        // Token inválido, limpa
-      });
-  }
-}, [user]);
-
-const logout = useCallback(() => {
-  const token = localStorage.getItem(TOKEN_KEY);
-  if (token) {
-    fetch(`${import.meta.env.VITE_API_URL || 'https://kdtaxi-api.onrender.com/api'}/logout`, { 
-      method: 'POST', 
-      headers: { Authorization: `Bearer ${token}` } 
-    }).catch(() => {});
-  }
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
-  setUser(null);
-  queryClient.clear();
-  setAuthNotice('Sua sessão terminou. Entre novamente para continuar.');
-  setLocation('/signin');
-}, [queryClient, setLocation]);
-
+  const [authNotice, setAuthNotice] = useState('');
+  const [location, setLocation] = useLocation();
+  const queryClient = useQueryClient();
+  const logout = useCallback(() => {
+    sessionStorage.removeItem(TOKEN_KEY); sessionStorage.removeItem(USER_KEY); setUser(null);
+    queryClient.clear(); setAuthNotice('Sua sessão terminou. Entre novamente para continuar.'); setLocation('/signin');
+  }, [queryClient, setLocation]);
   const notify = useCallback((message: string, kind: 'success' | 'error' = 'success') => setToast({ message, kind }), []);
   useEffect(() => {
     const handleAuthExpired = () => { setAuthNotice('Sua sessão expirou ou não tem permissão. Entre novamente.'); logout(); };
@@ -461,7 +417,7 @@ const logout = useCallback(() => {
   }, [logout]);
   useEffect(() => { if (!user && location !== '/signin') setLocation('/signin'); }, [user, location]);
   const signedIn = (nextUser: User, token: string) => {
-    localStorage.setItem(TOKEN_KEY, token); localStorage.setItem(USER_KEY, JSON.stringify(nextUser)); setUser(nextUser); setAuthNotice('');
+    sessionStorage.setItem(TOKEN_KEY, token); sessionStorage.setItem(USER_KEY, JSON.stringify(nextUser)); setUser(nextUser); setAuthNotice('');
     queryClient.clear(); setLocation('/');
   };
   if (!user || location === '/signin') {
