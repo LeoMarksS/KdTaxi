@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { UserMode } from "./userMode";
+import type { VehicleType } from "./vehicleType";
 
 export interface AdminUserUpdate {
   name?: string;
@@ -13,5 +14,6 @@ export interface AdminUserUpdate {
   /** @minLength 4 */
   password?: string;
   mode?: UserMode;
+  vehicleType?: VehicleType;
   active?: boolean;
 }

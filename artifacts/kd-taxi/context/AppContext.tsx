@@ -25,6 +25,24 @@ export interface User {
   rideCount?: number;
 }
 
+const MAX_CACHED_USER_PHOTO_CHARS = 32 * 1024;
+
+function getPersistedUser(user: User): User {
+  const compactUser: User = {
+    id: user.id,
+    name: user.name,
+    phone: user.phone,
+    mode: user.mode,
+  };
+  if (user.vehicleType) compactUser.vehicleType = user.vehicleType;
+  if (user.photo && user.photo.length <= MAX_CACHED_USER_PHOTO_CHARS) {
+    compactUser.photo = user.photo;
+  }
+  if (user.rating !== undefined) compactUser.rating = user.rating;
+  if (user.rideCount !== undefined) compactUser.rideCount = user.rideCount;
+  return compactUser;
+}
+
 export type RideStatus = "waiting" | "accepted" | "in_progress" | "finished" | "cancelled";
 export type VehicleType = "car" | "motorcycle";
 
@@ -273,9 +291,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const setUser = useCallback((u: User | null) => {
     setUserState(u);
-    if (u) AsyncStorage.setItem("kd_user", JSON.stringify(u));
-    else AsyncStorage.removeItem("kd_user");
+    if (u) {
+      void AsyncStorage.setItem("kd_user", JSON.stringify(getPersistedUser(u))).catch((error: unknown) => {
+        console.warn("KD TAXI could not save the compact user cache; the profile can be refreshed from the server.", error);
+        void AsyncStorage.removeItem("kd_user").catch(() => {});
+      });
+    } else {
+      void AsyncStorage.removeItem("kd_user").catch(() => {});
+    }
   }, []);
+
+  // Keep large profile photos in memory, not in AsyncStorage. Rehydrate them
+  // from the authenticated profile endpoint after login or app restart.
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId || !token) return;
+    let cancelled = false;
+    void authFetch(`/users/${userId}`)
+      .then(async (response) => {
+        if (!response.ok || cancelled) return;
+        const refreshedUser = await response.json() as User;
+        if (!cancelled) setUser(refreshedUser);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [user?.id, token, authFetch, setUser]);
 
   const setDriverOnline = useCallback((online: boolean) => {
     setDriverOnlineState(online);

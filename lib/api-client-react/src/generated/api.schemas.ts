@@ -94,6 +94,7 @@ export interface AdminUserInput {
   /** @minLength 4 */
   password: string;
   mode?: UserMode;
+  vehicleType?: VehicleType;
 }
 
 export interface AdminUserUpdate {
@@ -102,6 +103,7 @@ export interface AdminUserUpdate {
   /** @minLength 4 */
   password?: string;
   mode?: UserMode;
+  vehicleType?: VehicleType;
   active?: boolean;
 }
 
