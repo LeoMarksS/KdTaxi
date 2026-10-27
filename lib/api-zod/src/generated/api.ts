@@ -180,7 +180,6 @@ export const CreateAdminUserBody = zod.object({
   phone: zod.string().min(1),
   password: zod.string().min(createAdminUserBodyPasswordMin),
   mode: zod.enum(["client", "driver", "admin"]).optional(),
-  vehicleType: zod.enum(["car", "motorcycle"]).optional(),
 });
 
 export const CreateAdminUserResponse = zod.object({
@@ -212,7 +211,6 @@ export const UpdateAdminUserBody = zod.object({
   phone: zod.string().optional(),
   password: zod.string().min(updateAdminUserBodyPasswordMin).optional(),
   mode: zod.enum(["client", "driver", "admin"]).optional(),
-  vehicleType: zod.enum(["car", "motorcycle"]).optional(),
   active: zod.boolean().optional(),
 });
 
