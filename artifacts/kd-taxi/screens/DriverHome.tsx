@@ -495,10 +495,16 @@ export default function DriverHome() {
               <Feather name="list" size={22} color={colors.mutedForeground} />
             </TouchableOpacity>
             <TouchableOpacity style={{ padding: 8 }} onPress={() => {
-              Alert.alert("Sair da conta", "Tem certeza que deseja sair?", [
-                { text: "Cancelar", style: "cancel" },
-                { text: "Sair", style: "destructive", onPress: logout },
-              ]);
+              if (Platform.OS === "web") {
+            if (window.confirm("Tem certeza que deseja sair?")) {
+              logout();
+            }
+          } else {
+            Alert.alert("Sair da conta", "Tem certeza que deseja sair?", [
+              { text: "Cancelar", style: "cancel" },
+              { text: "Sair", style: "destructive", onPress: logout },
+            ]);
+          }
             }}>
               <Feather name="log-out" size={22} color={colors.mutedForeground} />
             </TouchableOpacity>

@@ -303,10 +303,16 @@ export default function ClientHome() {
               <UserAvatar name={user?.name ?? "?"} photo={user?.photo} size={40} mode="client" />
             </TouchableOpacity>
             <TouchableOpacity style={{ padding: 4 }} onPress={() => {
-              Alert.alert("Sair da conta", "Tem certeza que deseja sair?", [
-                { text: "Cancelar", style: "cancel" },
-                { text: "Sair", style: "destructive", onPress: logout },
-              ]);
+              if (Platform.OS === "web") {
+            if (window.confirm("Tem certeza que deseja sair?")) {
+              logout();
+            }
+          } else {
+            Alert.alert("Sair da conta", "Tem certeza que deseja sair?", [
+              { text: "Cancelar", style: "cancel" },
+              { text: "Sair", style: "destructive", onPress: logout },
+            ]);
+          }
             }}>
               <Feather name="log-out" size={20} color={colors.mutedForeground} />
             </TouchableOpacity>

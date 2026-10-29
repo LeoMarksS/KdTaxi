@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/kd-taxi-admin/"
+title = "KD TAXI Administração"
+description = "Painel web administrativo do KD TAXI para acompanhar a operação, gerenciar usuários e corridas e configurar preços, usando as permissões administrativas já protegidas pela API compartilhada."
+version = "1.0.0"
+id = "artifacts/kd-taxi-admin"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/kd-taxi-admin/" ]
+localPort = 22608
+
+[services.development]
+run = "pnpm --filter @workspace/kd-taxi-admin run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/kd-taxi-admin", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/kd-taxi-admin/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22608"
+BASE_PATH = "/kd-taxi-admin/"

@@ -1,0 +1,108 @@
+Crie um aplicativo mobile completo chamado KD TAXI, utilizando React Native com Expo, focado em dispositivos Android e iOS. O app deve ser simples, leve, intuitivo e voltado para uma cidade pequena, com gerenciamento básico de corridas.
+
+🧱 STACK OBRIGATÓRIA
+Frontend Mobile: React Native + Expo
+Backend: Node.js + Express (rodando no Replit)
+Tempo real: Socket.io
+Armazenamento: SQLite ou JSON simples
+Notificações:
+Push via Expo Notifications
+Sons locais no app
+📱 ESTRUTURA DO APP (MOBILE)
+
+Criar um app com 3 modos de uso:
+
+Cliente
+Motorista
+Admin (modo simples dentro do app ou web)
+📲 TELAS – CLIENTE
+Login simples (nome + telefone)
+Tela principal:
+Botão grande: “Chamar Táxi”
+Formulário:
+Origem (texto)
+Destino (texto)
+Tela de status da corrida:
+Procurando motorista
+Aceita
+Em andamento
+Finalizada
+Notificação push em tempo real
+Alerta sonoro ao aceitar corrida
+Chat em tempo real com motorista
+Interface com botões grandes e fácil uso
+🚕 TELAS – MOTORISTA
+Login
+Botão:
+👉 Online / Offline
+Tela de corridas recebidas
+Exibir:
+Origem
+Destino
+Botões:
+Aceitar
+Recusar
+Som alto ao receber corrida
+Tela de corrida ativa
+Chat com cliente
+Botão Finalizar corrida
+🖥️ ADMIN (SIMPLES)
+Pode ser:
+Tela dentro do app OU
+Página web simples no backend
+Funções:
+Ver corridas
+Ver usuários
+Ativar/desativar motoristas
+🔄 BACKEND (REPLIT)
+
+Criar API com:
+
+POST /login
+POST /request-ride
+POST /accept-ride
+POST /finish-ride
+GET /rides
+🔌 SOCKET.IO (TEMPO REAL)
+
+Eventos:
+
+nova_corrida
+corrida_aceita
+corrida_finalizada
+mensagem_chat
+💬 CHAT
+Chat em tempo real por corrida
+Identificação por ID da corrida
+Interface simples estilo WhatsApp
+🔔 NOTIFICAÇÕES E SONS
+Usar Expo Notifications
+Quando:
+Motorista recebe corrida → som + alerta
+Cliente recebe aceitação → som + notificação
+Sons locais (arquivo mp3 no projeto)
+🎨 DESIGN
+Mobile-first (prioridade total)
+Estilo moderno e limpo
+Botões grandes
+Ícones com animação leve
+Cores por status:
+Amarelo: aguardando
+Verde: aceita
+Azul: em andamento
+Cinza: finalizada
+⚙️ REGRAS IMPORTANTES
+❌ Sem mapa
+❌ Sem pagamento
+✅ Foco total em simplicidade
+✅ Código organizado
+✅ Pronto para escalar depois
+🎯 OBJETIVO
+
+Criar um aplicativo estilo Uber simplificado, focado em cidades pequenas, com comunicação em tempo real entre cliente e motorista, funcionando perfeitamente em Android e iOS.
+
+💡 COMANDO FINAL PARA REPLIT AI
+
+Adicione isso no final do prompt:
+
+“Gere todo o projeto completo com React Native (Expo) + backend Node.js, incluindo instruções passo a passo para rodar no Replit e testar no celular via Expo Go.”

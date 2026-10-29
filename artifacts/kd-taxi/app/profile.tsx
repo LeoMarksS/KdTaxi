@@ -219,10 +219,20 @@ export default function ProfileScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity style={s.logoutBtn} onPress={() => {
-            Alert.alert("Sair da conta", "Tem certeza que deseja sair?", [
-              { text: "Cancelar", style: "cancel" },
-              { text: "Sair", style: "destructive", onPress: () => { logout(); router.replace("/login"); } },
-            ]);
+            const performLogout = () => {
+              logout();
+              router.replace("/login");
+            };
+
+            if (Platform.OS === "web") {
+              const confirmed = window.confirm("Tem certeza que deseja sair?");
+              if (confirmed) performLogout();
+            } else {
+              Alert.alert("Sair da conta", "Tem certeza que deseja sair?", [
+                { text: "Cancelar", style: "cancel" },
+                { text: "Sair", style: "destructive", onPress: performLogout },
+              ]);
+            }
           }}>
             <Text style={s.logoutText}>Sair da conta</Text>
           </TouchableOpacity>
