@@ -3,9 +3,17 @@ import { Router } from "express";
 import type { NextFunction, Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
-import { pool, initDb, getUserByPhone, getUserById, createUserDb, createSessionDb, getSessionDb, deleteSessionDb } from "../lib/db";
+import { db, users as dbUsers, sessions as dbSessions, rides as dbRides, chatMessages as dbChatMessages, pricingRules as dbPricingRules } from "@workspace/db";
+import { and, asc, eq, inArray, isNull, lt, or } from "drizzle-orm";
+import type { Server as SocketIOServer } from "socket.io";
 
 const router = Router();
+
+let socketServer: SocketIOServer | undefined;
+
+export function setSocketServer(server: SocketIOServer): void {
+  socketServer = server;
+}
 
 interface User {
   id: string;
@@ -83,88 +91,210 @@ const users: Map<string, User> = new Map();
 const rides: Map<string, Ride> = new Map();
 const pricing: Map<string, PriceRule> = new Map();
 const sessions: Map<string, Session> = new Map();
+// Chat history persisted server-side (keyed by rideId) so messages survive
+// brief socket disconnects/reconnects and reloads instead of being lost in transit.
 const chatByRide: Map<string, ChatMessage[]> = new Map();
 
-const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 function getId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
 }
 
-function createSession(userId: string): string {
+function userFromRecord(record: typeof dbUsers.$inferSelect): User {
+  return {
+    id: record.id,
+    name: record.name,
+    phone: record.phone,
+    passwordHash: record.passwordHash,
+    mode: record.mode as User["mode"],
+    vehicleType: record.vehicleType === "motorcycle" ? "motorcycle" :
+      record.vehicleType === "car" ? "car" : undefined,
+    active: record.active,
+    photo: record.photo ?? undefined,
+    pushToken: record.pushToken ?? undefined,
+    rating: record.rating,
+    rideCount: record.rideCount,
+    createdAt: record.createdAt.toISOString(),
+  };
+}
+
+function rideFromRecord(record: typeof dbRides.$inferSelect): Ride {
+  return {
+    id: record.id,
+    clientId: record.clientId,
+    clientName: record.clientName,
+    clientPhone: record.clientPhone,
+    clientPhoto: record.clientPhoto ?? undefined,
+    clientAvgRating: record.clientAvgRating ?? undefined,
+    clientRideCount: record.clientRideCount ?? undefined,
+    driverId: record.driverId ?? undefined,
+    driverName: record.driverName ?? undefined,
+    driverPhoto: record.driverPhoto ?? undefined,
+    driverAvgRating: record.driverAvgRating ?? undefined,
+    driverRideCount: record.driverRideCount ?? undefined,
+    origin: record.origin,
+    destination: record.destination,
+    vehicleType: record.vehicleType as Ride["vehicleType"],
+    price: record.price ?? undefined,
+    payment: (record.payment ?? undefined) as Ride["payment"],
+    status: record.status as Ride["status"],
+    clientRating: record.clientRating ?? undefined,
+    driverRating: record.driverRating ?? undefined,
+    createdAt: record.createdAt.toISOString(),
+    acceptedAt: record.acceptedAt?.toISOString(),
+    finishedAt: record.finishedAt?.toISOString(),
+  };
+}
+
+// Carrega usuários e sessões persistidos antes de o servidor receber conexões.
+export async function initializeAuthStore(): Promise<void> {
+  const [existingAdmin] = await db.select().from(dbUsers)
+    .where(eq(dbUsers.mode, "admin")).limit(1);
+
+  if (!existingAdmin) {
+    const initialPhone = process.env.ADMIN_INITIAL_PHONE?.trim();
+    const initialPassword = process.env.ADMIN_INITIAL_PASSWORD;
+    const initialName = process.env.ADMIN_INITIAL_NAME?.trim() || "Administrador";
+
+    if (!initialPhone || !initialPassword) {
+      throw new Error(
+        "Nenhum administrador foi encontrado. Configure ADMIN_INITIAL_PHONE e ADMIN_INITIAL_PASSWORD (mínimo de 12 caracteres) para criar o primeiro administrador."
+      );
+    }
+
+    if (initialPassword.length < 12 || initialPassword.length > 128) {
+      throw new Error("ADMIN_INITIAL_PASSWORD deve ter entre 12 e 128 caracteres.");
+    }
+
+    const now = new Date();
+    await db.insert(dbUsers).values({
+      id: crypto.randomUUID(),
+      name: initialName,
+      phone: initialPhone,
+      passwordHash: await bcrypt.hash(initialPassword, 10),
+      mode: "admin",
+      active: true,
+      rating: 0,
+      rideCount: 0,
+      createdAt: now,
+    });
+  }
+
+  const userRecords = await db.select().from(dbUsers);
+  users.clear();
+  for (const record of userRecords) {
+    users.set(record.id, userFromRecord(record));
+  }
+
+  await db.delete(dbSessions).where(lt(dbSessions.expiresAt, Date.now()));
+  const sessionRecords = await db.select().from(dbSessions);
+  sessions.clear();
+  for (const record of sessionRecords) {
+    sessions.set(record.token, {
+      userId: record.userId,
+      expiresAt: record.expiresAt,
+    });
+  }
+
+  const rideRecords = await db.select().from(dbRides);
+  rides.clear();
+  for (const record of rideRecords) {
+    rides.set(record.id, rideFromRecord(record));
+  }
+
+  const pricingRecords = await db.select().from(dbPricingRules);
+  pricing.clear();
+  for (const record of pricingRecords) {
+    pricing.set(record.id, {
+      id: record.id,
+      destination: record.destination,
+      price: record.price,
+      isLocal: record.isLocal,
+      createdAt: record.createdAt.toISOString(),
+    });
+  }
+
+  console.info(
+    `[auth] ${users.size} usuários, ${sessions.size} sessões, ` +
+    `${rides.size} corridas e ${pricing.size} tarifas carregados do Neon.`
+  );
+}
+
+async function createSession(userId: string): Promise<string> {
   const token = crypto.randomBytes(32).toString("hex");
   const expiresAt = Date.now() + SESSION_TTL_MS;
+
+  await db.insert(dbSessions).values({ token, userId, expiresAt });
   sessions.set(token, { userId, expiresAt });
-  if (pool) createSessionDb(token, userId, expiresAt).catch(console.error);
   return token;
 }
 
-async function getUserByTokenAsync(token: string | undefined): Promise<User | undefined> {
-  if (!token) return undefined;
-  let session = sessions.get(token);
-  if (!session && pool) {
-    const dbSess = await getSessionDb(token).catch(() => null);
-    if (dbSess) {
-      const expiresAt = new Date(dbSess.expira_em).getTime();
-      if (expiresAt > Date.now()) {
-        session = { userId: dbSess.conta_id, expiresAt };
-        sessions.set(token, session);
-      }
+async function revokeOtherUserSessions(userId: string, keepToken?: string): Promise<void> {
+  const records = await db.select({ token: dbSessions.token })
+    .from(dbSessions)
+    .where(eq(dbSessions.userId, userId));
+
+  const tokens = records.map((record) => record.token)
+    .filter((token) => token !== keepToken);
+
+  if (tokens.length > 0) {
+    await db.delete(dbSessions).where(inArray(dbSessions.token, tokens));
+    for (const token of tokens) sessions.delete(token);
+  }
+
+  if (socketServer) {
+    const connectedSockets = await socketServer.in(`user:${userId}`).fetchSockets();
+    for (const socket of connectedSockets) {
+      const socketToken = (socket.data as { sessionToken?: string }).sessionToken;
+      if (socketToken !== keepToken) socket.disconnect(true);
     }
   }
-  if (!session) return undefined;
-  if (session.expiresAt < Date.now()) {
-    sessions.delete(token);
-    if (pool) deleteSessionDb(token).catch(console.error);
-    return undefined;
-  }
-  let user = users.get(session.userId);
-  if (!user && pool) {
-    const dbUser = await getUserById(session.userId).catch(() => null);
-    if (dbUser) {
-      user = {
-        id: dbUser.id,
-        name: dbUser.nome,
-        phone: dbUser.phone || dbUser.email,
-        passwordHash: dbUser.password_hash || dbUser.senha || "",
-        mode: (dbUser.mode || dbUser.tipo) as any,
-        vehicleType: dbUser.vehicle_type as any,
-        active: true,
-        photo: dbUser.photo,
-        rating: Number(dbUser.rating || 0),
-        rideCount: Number(dbUser.ride_count || 0),
-        createdAt: dbUser.created_at ? new Date(dbUser.created_at).toISOString() : new Date().toISOString(),
-      };
-      users.set(user.id, user);
-    }
-  }
-  return user;
-}
-function getUserByToken(token: string | undefined): User | undefined {
-  if (!token) return undefined;
-  const session = sessions.get(token);
-  if (!session) return undefined;
-  if (session.expiresAt < Date.now()) {
-    sessions.delete(token);
-    if (pool) deleteSessionDb(token).catch(console.error);
-    return undefined;
-  }
-  return users.get(session.userId);
-}
-async function getSessionUserAsync(req: import("express").Request): Promise<User | undefined> {
-  const auth = req.headers.authorization;
-  if (!auth?.startsWith("Bearer ")) return undefined;
-  return await getUserByTokenAsync(auth.slice(7));
 }
 
-function getSessionUser(req: Request): User | undefined {
+async function getUserByToken(token: string | undefined): Promise<User | undefined> {
+  if (!token) return undefined;
+
+  const [session] = await db.select().from(dbSessions)
+    .where(eq(dbSessions.token, token)).limit(1);
+
+  if (!session) {
+    sessions.delete(token);
+    return undefined;
+  }
+
+  if (session.expiresAt < Date.now()) {
+    await db.delete(dbSessions).where(eq(dbSessions.token, token));
+    sessions.delete(token);
+    return undefined;
+  }
+
+  let user = users.get(session.userId);
+  if (!user) {
+    const [record] = await db.select().from(dbUsers)
+      .where(eq(dbUsers.id, session.userId)).limit(1);
+    if (!record) return undefined;
+    user = userFromRecord(record);
+    users.set(user.id, user);
+  }
+
+  if (!user.active) {
+    await revokeOtherUserSessions(user.id);
+    return undefined;
+  }
+
+  sessions.set(token, { userId: session.userId, expiresAt: session.expiresAt });
+  return user;
+}
+
+async function getSessionUser(req: Request): Promise<User | undefined> {
   const auth = req.headers.authorization;
   if (!auth?.startsWith("Bearer ")) return undefined;
   return getUserByToken(auth.slice(7));
 }
 
-export function authenticateSocketToken(token: string | undefined) {
-  const user = getUserByToken(token);
+export async function authenticateSocketToken(token: string | undefined) {
+  const user = await getUserByToken(token);
   if (!user) return undefined;
   return safeUser(user);
 }
@@ -175,7 +305,17 @@ export function isRideParticipant(rideId: string, userId: string): boolean {
   return ride.clientId === userId || ride.driverId === userId;
 }
 
-export function recordChatMessage(msg: ChatMessage) {
+export async function recordChatMessage(msg: ChatMessage): Promise<void> {
+  await db.insert(dbChatMessages).values({
+    id: msg.id,
+    rideId: msg.rideId,
+    senderId: msg.senderId,
+    senderName: msg.senderName,
+    senderPhoto: msg.senderPhoto ?? null,
+    text: msg.text,
+    timestamp: new Date(msg.timestamp),
+  });
+
   const list = chatByRide.get(msg.rideId) ?? [];
   list.push(msg);
   chatByRide.set(msg.rideId, list);
@@ -188,6 +328,7 @@ export function getRideParticipants(rideId: string): { clientId?: string; driver
 }
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       authUser?: User;
@@ -196,7 +337,7 @@ declare global {
 }
 
 async function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const user = await getSessionUserAsync(req);
+  const user = await getSessionUser(req);
   if (!user) {
     res.status(401).json({ error: "Não autenticado" });
     return;
@@ -206,7 +347,7 @@ async function requireAuth(req: Request, res: Response, next: NextFunction) {
 }
 
 async function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  const user = await getSessionUserAsync(req);
+  const user = await getSessionUser(req);
   if (!user || user.mode !== "admin") {
     res.status(403).json({ error: "Acesso negado" });
     return;
@@ -215,63 +356,7 @@ async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-const defaultAdmin: User = {
-  id: "00000000-0000-0000-0000-000000000001",
-  name: "Administrador",
-  phone: "admin",
-  passwordHash: bcrypt.hashSync("admin123", 10),
-  mode: "admin",
-  active: true,
-  rating: 0,
-  rideCount: 0,
-  createdAt: new Date().toISOString(),
-};
-users.set(defaultAdmin.id, defaultAdmin);
-
-// Carrega usuários do Neon para memória no startup (modo profissional)
-async function loadUsersFromNeon() {
-  if (!pool) return;
-  try {
-    const res = await pool.query(`SELECT * FROM contas`);
-    for (const row of res.rows) {
-      const user: User = {
-        id: row.id,
-        name: row.nome,
-        phone: row.phone || row.email,
-        passwordHash: row.password_hash || row.senha || "",
-        mode: (row.mode || row.tipo || "client") as any,
-        vehicleType: row.vehicle_type as any,
-        active: true,
-        photo: row.photo,
-        rating: Number(row.rating || 0),
-        rideCount: Number(row.ride_count || 0),
-        createdAt: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString(),
-      };
-      if (user.phone) users.set(user.id, user);
-    }
-    console.log(`✅ ${res.rows.length} usuários carregados do Neon para memória`);
-  } catch (e) {
-    console.error("Erro ao carregar usuários do Neon:", e);
-  }
-}
-loadUsersFromNeon();
-async function loadSessionsFromNeon() {
-  if (!pool) return;
-  try {
-    const res = await pool.query(`SELECT token, conta_id, expira_em FROM sessoes WHERE expira_em > NOW()`);
-    for (const row of res.rows) {
-      const expiresAt = new Date(row.expira_em).getTime();
-      if (expiresAt > Date.now()) {
-        sessions.set(row.token, { userId: row.conta_id, expiresAt });
-      }
-    }
-    console.log(`✅ ${res.rows.length} sessões carregadas do Neon`);
-  } catch (e) {
-    console.error("Erro ao carregar sessões do Neon:", e);
-  }
-}
-loadSessionsFromNeon();
-
+// Login attempts are limited per phone+IP so one blocked account never locks out other users on the same network
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 15,
@@ -281,12 +366,21 @@ const loginLimiter = rateLimit({
   message: { error: "Muitas tentativas de login. Tente novamente em alguns minutos." },
 });
 
+// Registration is a rare, one-off action per user, so it gets a much more generous allowance
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Muitas tentativas de cadastro. Tente novamente em alguns minutos." },
+});
+
+const changePasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Muitas tentativas. Aguarde alguns minutos antes de tentar novamente." },
 });
 
 async function sendPushNotification(token: string, title: string, body: string, data?: object) {
@@ -301,6 +395,7 @@ async function sendPushNotification(token: string, title: string, body: string, 
 
 function lookupPrice(destination: string): { price: number; isLocal: boolean } | undefined {
   const dest = destination.toLowerCase().trim();
+  // First try to match specific (non-local) pricing rules
   for (const rule of pricing.values()) {
     if (rule.isLocal) continue;
     if (dest.includes(rule.destination.toLowerCase().trim()) ||
@@ -308,6 +403,7 @@ function lookupPrice(destination: string): { price: number; isLocal: boolean } |
       return { price: rule.price, isLocal: false };
     }
   }
+  // Fallback: use local/intra-city price if configured
   const localRule = Array.from(pricing.values()).find((r) => r.isLocal);
   if (localRule) return { price: localRule.price, isLocal: true };
   return undefined;
@@ -323,7 +419,7 @@ function safeUserList(u: User) {
   return rest;
 }
 
-// POST /register – PROFISSIONAL: salva no Neon
+// POST /register – create a new client or driver account
 router.post("/register", registerLimiter, async (req: Request, res: Response) => {
   const { name, phone, password, mode, photo, vehicleType } = req.body as {
     name?: string; phone?: string; password?: string; mode?: string; photo?: string;
@@ -334,36 +430,21 @@ router.post("/register", registerLimiter, async (req: Request, res: Response) =>
     res.status(400).json({ error: "Nome, telefone e senha são obrigatórios" });
     return;
   }
-  if (password.length < 4) {
-    res.status(400).json({ error: "A senha deve ter ao menos 4 caracteres" });
+  if (typeof password !== "string" || password.length < 8 || password.length > 128) {
+    res.status(400).json({ error: "A senha deve ter entre 8 e 128 caracteres." });
     return;
   }
   if (mode !== "client" && mode !== "driver") {
     res.status(400).json({ error: "Tipo de conta inválido" });
     return;
   }
+  if (mode === "driver" && vehicleType !== undefined && vehicleType !== "car" && vehicleType !== "motorcycle") {
+    res.status(400).json({ error: "Tipo de veículo inválido" });
+    return;
+  }
 
   const normalizedPhone = phone.trim();
-  let existing = Array.from(users.values()).find((u) => u.phone === normalizedPhone);
-  if (!existing && pool) {
-    const dbRow = await getUserByPhone(normalizedPhone);
-    if (dbRow) {
-      existing = {
-        id: dbRow.id,
-        name: dbRow.nome,
-        phone: dbRow.phone || dbRow.email,
-        passwordHash: dbRow.password_hash || dbRow.senha,
-        mode: (dbRow.mode || dbRow.tipo) as any,
-        vehicleType: dbRow.vehicle_type as any,
-        active: true,
-        photo: dbRow.photo,
-        rating: Number(dbRow.rating || 0),
-        rideCount: Number(dbRow.ride_count || 0),
-        createdAt: dbRow.created_at,
-      };
-      users.set(existing.id, existing);
-    }
-  }
+  const existing = Array.from(users.values()).find((u) => u.phone === normalizedPhone);
   if (existing) {
     res.status(409).json({ error: "Este telefone já está cadastrado" });
     return;
@@ -377,20 +458,34 @@ router.post("/register", registerLimiter, async (req: Request, res: Response) =>
     active: true, rating: 0, rideCount: 0,
     photo, createdAt: new Date().toISOString(),
   };
-  users.set(user.id, user);
-  if (pool) {
-    try {
-      await createUserDb(user);
-      console.log(`✅ Usuário ${user.phone} salvo no Neon`);
-    } catch (e) {
-      console.error("Erro ao salvar no Neon:", e);
+  try {
+    await db.insert(dbUsers).values({
+      id: user.id,
+      name: user.name,
+      phone: user.phone,
+      passwordHash: user.passwordHash,
+      mode: user.mode,
+      vehicleType: user.vehicleType ?? null,
+      active: user.active,
+      photo: user.photo ?? null,
+      pushToken: user.pushToken ?? null,
+      rating: user.rating,
+      rideCount: user.rideCount,
+      createdAt: new Date(user.createdAt),
+    });
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") {
+      res.status(409).json({ error: "Este telefone já está cadastrado" });
+      return;
     }
+    throw error;
   }
-  const token = createSession(user.id);
+  users.set(user.id, user);
+  const token = await createSession(user.id);
   res.json({ user: safeUser(user), token });
 });
 
-// POST /login – PROFISSIONAL: busca no Neon
+// POST /login – identifies the account (and its role) purely from phone + password
 router.post("/login", loginLimiter, async (req: Request, res: Response) => {
   const { phone, password } = req.body as { phone?: string; password?: string };
 
@@ -399,255 +494,1178 @@ router.post("/login", loginLimiter, async (req: Request, res: Response) => {
     return;
   }
 
-  let user = Array.from(users.values()).find((u) => u.phone === phone.trim());
-  if (!user && pool) {
-    const dbRow = await getUserByPhone(phone.trim());
-    if (dbRow) {
-      user = {
-        id: dbRow.id,
-        name: dbRow.nome,
-        phone: dbRow.phone || dbRow.email,
-        passwordHash: dbRow.password_hash || dbRow.senha,
-        mode: (dbRow.mode || dbRow.tipo) as any,
-        vehicleType: dbRow.vehicle_type as any,
-        active: true,
-        photo: dbRow.photo,
-        rating: Number(dbRow.rating || 0),
-        rideCount: Number(dbRow.ride_count || 0),
-        createdAt: dbRow.created_at ? new Date(dbRow.created_at).toISOString() : new Date().toISOString(),
-      };
-      users.set(user.id, user);
+  try {
+    const [record] = await db.select()
+      .from(dbUsers)
+      .where(eq(dbUsers.phone, phone.trim()))
+      .limit(1);
+
+    if (!record || !(await bcrypt.compare(password, record.passwordHash))) {
+      res.status(401).json({ error: "Telefone ou senha inválidos" });
+      return;
     }
-  }
-  if (!user || !bcrypt.compareSync(password, user.passwordHash)) {
-    res.status(401).json({ error: "Telefone ou senha inválidos" });
-    return;
-  }
 
-  const token = createSession(user.id);
-  res.json({ user: safeUser(user), token });
+    if (!record.active) {
+      res.status(403).json({ error: "Esta conta está desativada" });
+      return;
+    }
+
+    const user = userFromRecord(record);
+    users.set(user.id, user);
+
+    const token = await createSession(user.id);
+    res.json({ user: safeUser(user), token });
+  } catch (error) {
+    console.error("[auth] Erro ao realizar login:", error);
+    res.status(500).json({ error: "Não foi possível realizar o login" });
+  }
 });
 
-// GET /me
-router.get("/me", requireAuth, (req, res) => {
-  res.json({ user: safeUser(req.authUser!) });
+// POST /logout – invalidate the current session token
+router.post("/change-password", requireAuth, changePasswordLimiter, async (req: Request, res: Response) => {
+  try {
+    const { currentPassword, newPassword } = req.body as {
+      currentPassword?: string;
+      newPassword?: string;
+    };
+
+    if (typeof currentPassword !== "string" || !currentPassword) {
+      res.status(400).json({ error: "Informe sua senha atual." });
+      return;
+    }
+
+    if (typeof newPassword !== "string" || newPassword.length < 12 || newPassword.length > 128) {
+      res.status(400).json({ error: "A nova senha deve ter entre 8 e 128 caracteres." });
+      return;
+    }
+
+    const user = req.authUser;
+    if (!user) {
+      res.status(401).json({ error: "Não autenticado." });
+      return;
+    }
+
+    const currentIsValid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!currentIsValid) {
+      res.status(400).json({ error: "A senha atual está incorreta." });
+      return;
+    }
+
+    if (await bcrypt.compare(newPassword, user.passwordHash)) {
+      res.status(400).json({ error: "A nova senha deve ser diferente da senha atual." });
+      return;
+    }
+
+    const newPasswordHash = await bcrypt.hash(newPassword, 10);
+    await db.update(dbUsers)
+      .set({ passwordHash: newPasswordHash })
+      .where(eq(dbUsers.id, user.id));
+
+    user.passwordHash = newPasswordHash;
+
+    const authorization = req.headers.authorization;
+    const currentToken = authorization?.startsWith("Bearer ")
+      ? authorization.slice(7)
+      : undefined;
+
+    await revokeOtherUserSessions(user.id, currentToken);
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("[auth] Erro ao alterar senha:", error);
+    res.status(500).json({ error: "Não foi possível alterar a senha." });
+  }
 });
 
-// POST /push-token
-router.post("/push-token", requireAuth, (req, res) => {
-  const { token } = req.body as { token?: string };
-  if (!token) {
-    res.status(400).json({ error: "Token obrigatório" });
-    return;
+router.post("/logout", requireAuth, async (req: Request, res: Response) => {
+  const auth = req.headers.authorization;
+  const token = auth?.slice(7);
+  if (token) {
+    await db.delete(dbSessions).where(eq(dbSessions.token, token));
+    sessions.delete(token);
   }
-  const user = users.get(req.authUser!.id);
-  if (user) user.pushToken = token;
   res.json({ ok: true });
 });
 
-// GET /users (admin)
-router.get("/users", requireAdmin, (req, res) => {
-  const list = Array.from(users.values()).map(safeUserList);
-  res.json(list);
-});
+// PUT /users/:id – a user may only edit their own profile
+router.put("/users/:id", requireAuth, async (req: Request, res: Response) => {
+  const id = req.params.id as string;
 
-// PUT /users/:id/toggle (admin)
-router.put("/users/:id/toggle", requireAdmin, (req, res) => {
-  const user = users.get(String(req.params.id));
+  if (req.authUser!.id !== id) {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+
+  const user = users.get(id);
   if (!user) {
-    res.status(404).json({ error: "Usuário não encontrado" });
+    res.status(404).json({ error: "User not found" });
     return;
   }
-  user.active = !user.active;
-  res.json(safeUserList(user));
-});
 
-// GET /rides
-router.get("/rides", requireAuth, (req, res) => {
-  const user = req.authUser!;
-  let list = Array.from(rides.values());
-  if (user.mode === "client") {
-    list = list.filter((r) => r.clientId === user.id);
-  } else if (user.mode === "driver") {
-    list = list.filter((r) => r.status === "waiting" && driverCanTakeRide(user, r));
-  }
-  res.json(list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-});
-
-// POST /rides
-router.post("/rides", requireAuth, (req, res) => {
-  const user = req.authUser!;
-  if (user.mode !== "client") {
-    res.status(403).json({ error: "Apenas clientes podem pedir corridas" });
-    return;
-  }
-  const { origin, destination, vehicleType, payment } = req.body as {
-    origin?: string; destination?: string; vehicleType?: string; payment?: string;
+  const { name, photo, pushToken } = req.body as {
+    name?: string;
+    photo?: string;
+    pushToken?: string;
   };
-  if (!origin?.trim() || !destination?.trim()) {
-    res.status(400).json({ error: "Origem e destino obrigatórios" });
+
+  const updatedName = name !== undefined ? name.trim() : user.name;
+
+  try {
+    await db.update(dbUsers)
+      .set({
+        name: updatedName,
+        ...(photo !== undefined ? { photo } : {}),
+        ...(pushToken !== undefined ? { pushToken } : {}),
+      })
+      .where(eq(dbUsers.id, id));
+
+    user.name = updatedName;
+    if (photo !== undefined) user.photo = photo;
+    if (pushToken !== undefined) user.pushToken = pushToken;
+
+    res.json(safeUser(user));
+  } catch (error) {
+    console.error("[profile] Erro ao atualizar perfil:", error);
+    res.status(500).json({ error: "Não foi possível atualizar o perfil" });
+  }
+});
+
+// GET /users – admin only, list of clients/drivers without passwords or push tokens
+router.get("/users", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const records = await db.select().from(dbUsers);
+
+    for (const record of records) {
+      const user = userFromRecord(record);
+      users.set(user.id, user);
+    }
+
+    res.json(records
+      .map(userFromRecord)
+      .filter((u) => u.mode !== "admin")
+      .map(safeUserList));
+  } catch (error) {
+    console.error("[admin] Erro ao listar usuários:", error);
+    res.status(500).json({ error: "Não foi possível listar os usuários" });
+  }
+});
+
+// GET /users/:id – self or admin only
+router.get("/users/:id", requireAuth, async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+
+  if (req.authUser!.id !== id && req.authUser!.mode !== "admin") {
+    res.status(403).json({ error: "Acesso negado" });
     return;
   }
-  const vt = vehicleType === "motorcycle" ? "motorcycle" : "car";
-  const pricingInfo = lookupPrice(destination);
-  const ride: Ride = {
+
+  try {
+    const [record] = await db.select()
+      .from(dbUsers)
+      .where(eq(dbUsers.id, id))
+      .limit(1);
+
+    if (!record) {
+      users.delete(id);
+      res.status(404).json({ error: "Not found" });
+      return;
+    }
+
+    const user = userFromRecord(record);
+    users.set(user.id, user);
+    res.json(safeUser(user));
+  } catch (error) {
+    console.error("[profile] Erro ao consultar usuário:", error);
+    res.status(500).json({ error: "Não foi possível consultar o usuário" });
+  }
+});
+
+// POST /users/:id/active – self only
+router.post("/users/:id/active", requireAuth, async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+
+  if (req.authUser!.id !== id) {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+
+  const user = users.get(id);
+  if (!user) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+
+  const active = req.body.active === true;
+
+  try {
+    // Impede que o único administrador ativo desative a própria conta.
+    if (!active && user.mode === "admin" && user.active) {
+      const activeAdmins = await db.select({ id: dbUsers.id })
+        .from(dbUsers)
+        .where(and(eq(dbUsers.mode, "admin"), eq(dbUsers.active, true)));
+
+      if (activeAdmins.length <= 1) {
+        res.status(409).json({
+          error: "Não é possível desativar a conta do último administrador ativo."
+        });
+        return;
+      }
+    }
+
+    await db.update(dbUsers)
+      .set({ active })
+      .where(eq(dbUsers.id, id));
+
+    user.active = active;
+    if (!active) await revokeOtherUserSessions(id);
+    res.json(safeUser(user));
+  } catch (error) {
+    console.error("[profile] Erro ao alterar status da conta:", error);
+    res.status(500).json({ error: "Não foi possível alterar o status da conta" });
+  }
+});
+
+// ─── ADMIN ENDPOINTS ───────────────────────────────────────────────────────
+
+// PUT /admin/users/:id – admin can edit any user fully
+router.put("/admin/users/:id", requireAdmin, async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const user = users.get(id);
+
+  if (!user) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  const { name, phone, mode, vehicleType, active, password } = req.body as {
+    name?: string;
+    phone?: string;
+    mode?: string;
+    vehicleType?: string;
+    active?: boolean;
+    password?: string;
+  };
+
+  if (mode !== undefined && mode !== "client" && mode !== "driver" && mode !== "admin") {
+    res.status(400).json({ error: "Tipo de conta inválido" });
+    return;
+  }
+
+  if (vehicleType !== undefined && vehicleType !== "car" && vehicleType !== "motorcycle") {
+    res.status(400).json({ error: "Tipo de veículo inválido" });
+    return;
+  }
+
+  if (vehicleType !== undefined && (mode ?? user.mode) !== "driver") {
+    res.status(400).json({ error: "O tipo de veículo só pode ser definido para motoristas" });
+    return;
+  }
+
+  const updatedName = name !== undefined ? name.trim() : user.name;
+  const updatedPhone = phone !== undefined ? phone.trim() : user.phone;
+  const updatedMode = (mode ?? user.mode) as User["mode"];
+  const updatedVehicleType = (vehicleType ?? user.vehicleType) as User["vehicleType"];
+  const updatedActive = active !== undefined ? active : user.active;
+  if (password !== undefined &&
+      (typeof password !== "string" || password.length < 8 || password.length > 128)) {
+    res.status(400).json({ error: "A nova senha deve ter entre 8 e 128 caracteres." });
+    return;
+  }
+
+  try {
+    // Impede que o sistema fique sem nenhum administrador ativo.
+    const activeAdmins = await db.select({ id: dbUsers.id })
+      .from(dbUsers)
+      .where(and(eq(dbUsers.mode, "admin"), eq(dbUsers.active, true)));
+
+    const isCurrentActiveAdmin = activeAdmins.some((admin) => admin.id === id);
+    const isRemovingAdminAccess = updatedMode !== "admin" || !updatedActive;
+
+    if (isCurrentActiveAdmin && isRemovingAdminAccess && activeAdmins.length <= 1) {
+      res.status(409).json({
+        error: "Não é possível desativar ou rebaixar o último administrador ativo."
+      });
+      return;
+    }
+
+    const updatedPasswordHash = password !== undefined
+      ? await bcrypt.hash(password, 10)
+      : user.passwordHash;
+
+    await db.update(dbUsers)
+      .set({
+        name: updatedName,
+        phone: updatedPhone,
+        mode: updatedMode,
+        vehicleType: updatedVehicleType ?? null,
+        active: updatedActive,
+        passwordHash: updatedPasswordHash,
+      })
+      .where(eq(dbUsers.id, id));
+
+    user.name = updatedName;
+    user.phone = updatedPhone;
+    user.mode = updatedMode;
+    if (vehicleType !== undefined) user.vehicleType = updatedVehicleType;
+    user.active = updatedActive;
+    user.passwordHash = updatedPasswordHash;
+
+    if (!updatedActive) {
+      await revokeOtherUserSessions(id);
+    } else if (password !== undefined) {
+      const authorization = req.headers.authorization;
+      const currentToken = authorization?.startsWith("Bearer ")
+        ? authorization.slice(7)
+        : undefined;
+      const keepToken = req.authUser?.id === id ? currentToken : undefined;
+      await revokeOtherUserSessions(id, keepToken);
+    }
+
+    res.json(safeUser(user));
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") {
+      res.status(409).json({ error: "Telefone já cadastrado" });
+      return;
+    }
+    console.error("[admin] Erro ao atualizar usuário:", error);
+    res.status(500).json({ error: "Não foi possível atualizar o usuário" });
+  }
+});
+
+// DELETE /admin/users/:id – admin deletes a user
+router.delete("/admin/users/:id", requireAdmin, async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const user = users.get(id);
+
+  if (!user) {
+    res.status(404).json({ error: "Not found" });
+    return;
+  }
+
+  if (user.mode === "admin") {
+    res.status(403).json({ error: "Cannot delete admin account" });
+    return;
+  }
+
+  try {
+    await db.delete(dbSessions).where(eq(dbSessions.userId, id));
+    await db.delete(dbUsers).where(eq(dbUsers.id, id));
+
+    for (const [token, session] of sessions.entries()) {
+      if (session.userId === id) {
+        sessions.delete(token);
+      }
+    }
+
+    users.delete(id);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("[admin] Erro ao excluir usuário:", error);
+    res.status(500).json({ error: "Não foi possível excluir o usuário" });
+  }
+});
+
+// DELETE /admin/rides – exclui todas as corridas do Neon.
+router.delete("/admin/rides", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    await db.delete(dbRides);
+    rides.clear();
+    chatByRide.clear();
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("[admin] Erro ao excluir corridas:", error);
+    res.status(500).json({ error: "Não foi possível excluir as corridas" });
+  }
+});
+
+// GET /admin/stats – estatísticas calculadas diretamente do Neon.
+router.get("/admin/stats", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const [rideRecords, userRecords] = await Promise.all([
+      db.select().from(dbRides),
+      db.select().from(dbUsers),
+    ]);
+
+    const allRideList = rideRecords.map(rideFromRecord);
+    const allUserList = userRecords.map(userFromRecord);
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const finishedRides = allRideList.filter((r) => r.status === "finished");
+    const todayRides = allRideList.filter((r) => new Date(r.createdAt) >= todayStart);
+    const todayFinished = todayRides.filter((r) => r.status === "finished");
+    const totalRevenue = finishedRides.reduce((s, r) => s + (r.price ?? 0), 0);
+    const todayRevenue = todayFinished.reduce((s, r) => s + (r.price ?? 0), 0);
+    const ratedUsers = allUserList.filter((u) => u.rideCount > 0);
+
+    res.json({
+      totalUsers: allUserList.filter((u) => u.mode !== "admin").length,
+      totalClients: allUserList.filter((u) => u.mode === "client").length,
+      totalDrivers: allUserList.filter((u) => u.mode === "driver").length,
+      onlineDrivers: allUserList.filter((u) => u.mode === "driver" && u.active).length,
+      onlineCarDrivers: allUserList.filter((u) => u.mode === "driver" && u.active && driverVehicleType(u) === "car").length,
+      onlineMotorcycleDrivers: allUserList.filter((u) => u.mode === "driver" && u.active && driverVehicleType(u) === "motorcycle").length,
+      totalRides: allRideList.length,
+      finishedRides: finishedRides.length,
+      cancelledRides: allRideList.filter((r) => r.status === "cancelled").length,
+      activeRides: allRideList.filter((r) => ["waiting", "accepted", "in_progress"].includes(r.status)).length,
+      totalRevenue,
+      todayRides: todayRides.length,
+      todayRevenue,
+      avgRating: ratedUsers.reduce((s, u) => s + u.rating, 0) /
+        Math.max(1, ratedUsers.length),
+    });
+  } catch (error) {
+    console.error("[admin] Erro ao consultar estatísticas:", error);
+    res.status(500).json({ error: "Não foi possível consultar as estatísticas" });
+  }
+});
+
+// POST /admin/users – create a client, driver, or admin account
+router.post("/admin/users", requireAdmin, async (req: Request, res: Response) => {
+  const { name, phone, password, mode, vehicleType } = req.body as {
+    name: string;
+    phone: string;
+    password: string;
+    mode?: string;
+    vehicleType?: string;
+  };
+
+  if (!name?.trim() || !phone?.trim() || !password) {
+    res.status(400).json({ error: "Missing fields" });
+    return;
+  }
+
+  if (typeof password !== "string" || password.length < 8 || password.length > 128) {
+    res.status(400).json({ error: "A senha deve ter entre 8 e 128 caracteres." });
+    return;
+  }
+
+  if (mode !== undefined && mode !== "client" && mode !== "driver" && mode !== "admin") {
+    res.status(400).json({ error: "Tipo de conta inválido" });
+    return;
+  }
+
+  if (vehicleType !== undefined && vehicleType !== "car" && vehicleType !== "motorcycle") {
+    res.status(400).json({ error: "Tipo de veículo inválido" });
+    return;
+  }
+
+  if (vehicleType !== undefined && mode !== "driver") {
+    res.status(400).json({ error: "O tipo de veículo só pode ser definido para motoristas" });
+    return;
+  }
+
+  const normalizedPhone = phone.trim();
+  const existing = Array.from(users.values()).find((u) => u.phone === normalizedPhone);
+
+  if (existing) {
+    res.status(409).json({ error: "Telefone já cadastrado" });
+    return;
+  }
+
+  const resolvedMode = (mode as User["mode"]) ?? "admin";
+  const user: User = {
     id: getId(),
-    clientId: user.id,
-    clientName: user.name,
-    clientPhone: user.phone,
-    clientPhoto: user.photo,
-    clientAvgRating: user.rating,
-    clientRideCount: user.rideCount,
-    origin: origin.trim(),
-    destination: destination.trim(),
-    vehicleType: vt,
-    status: "waiting",
-    price: pricingInfo?.price,
-    payment: payment as any,
+    name: name.trim(),
+    phone: normalizedPhone,
+    passwordHash: bcrypt.hashSync(password, 10),
+    mode: resolvedMode,
+    ...(resolvedMode === "driver"
+      ? { vehicleType: (vehicleType as User["vehicleType"]) ?? "car" }
+      : {}),
+    active: resolvedMode !== "driver",
+    rating: 0,
+    rideCount: 0,
     createdAt: new Date().toISOString(),
   };
+
+  try {
+    await db.insert(dbUsers).values({
+      id: user.id,
+      name: user.name,
+      phone: user.phone,
+      passwordHash: user.passwordHash,
+      mode: user.mode,
+      vehicleType: user.vehicleType ?? null,
+      active: user.active,
+      photo: null,
+      pushToken: null,
+      rating: user.rating,
+      rideCount: user.rideCount,
+      createdAt: new Date(user.createdAt),
+    });
+
+    users.set(user.id, user);
+    res.json(safeUser(user));
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") {
+      res.status(409).json({ error: "Telefone já cadastrado" });
+      return;
+    }
+
+    console.error("[admin] Erro ao criar usuário:", error);
+    res.status(500).json({ error: "Não foi possível criar o usuário" });
+  }
+});
+
+// ─── RIDE ENDPOINTS ────────────────────────────────────────────────────────
+
+// POST /request-ride
+router.post("/request-ride", requireAuth, async (req: Request, res: Response) => {
+  const { clientId, origin, destination, payment, vehicleType } = req.body as {
+    clientId: string; origin: string; destination: string; payment?: string; vehicleType?: string;
+  };
+  if (!clientId || !origin || !destination) { res.status(400).json({ error: "Missing required fields" }); return; }
+
+  if (req.authUser!.mode !== "client" || req.authUser!.id !== clientId) {
+    res.status(403).json({ error: "Apenas o passageiro autenticado pode solicitar sua própria corrida" });
+    return;
+  }
+
+  if (payment !== undefined && payment !== "pix" && payment !== "dinheiro") {
+    res.status(400).json({ error: "Forma de pagamento inválida" });
+    return;
+  }
+  if (vehicleType !== undefined && vehicleType !== "car" && vehicleType !== "motorcycle") {
+    res.status(400).json({ error: "Tipo de veículo inválido" });
+    return;
+  }
+  if (req.authUser!.id !== clientId || req.authUser!.mode !== "client") {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+
+  const priceResult = lookupPrice(destination);
+  const price = priceResult?.price;
+  const client = req.authUser!;
+  const ride: Ride = {
+    id: getId(),
+    clientId,
+    clientName: client.name,
+    clientPhone: client.phone,
+    clientPhoto: client.photo,
+    clientAvgRating: client.rating,
+    clientRideCount: client.rideCount,
+    origin,
+    destination,
+    vehicleType: vehicleType === "motorcycle" ? "motorcycle" : "car",
+    price,
+    payment: (payment as Ride["payment"]) ?? "dinheiro",
+    status: "waiting",
+    createdAt: new Date().toISOString(),
+  };
+
+  try {
+    await db.insert(dbRides).values({
+      id: ride.id,
+      clientId: ride.clientId,
+      clientName: ride.clientName,
+      clientPhone: ride.clientPhone,
+      clientPhoto: ride.clientPhoto ?? null,
+      clientAvgRating: ride.clientAvgRating ?? null,
+      clientRideCount: ride.clientRideCount ?? null,
+      driverId: null,
+      driverName: null,
+      driverPhoto: null,
+      driverAvgRating: null,
+      driverRideCount: null,
+      origin: ride.origin,
+      destination: ride.destination,
+      vehicleType: ride.vehicleType,
+      price: ride.price ?? null,
+      payment: ride.payment ?? "dinheiro",
+      status: ride.status,
+      createdAt: new Date(ride.createdAt),
+      acceptedAt: null,
+      finishedAt: null,
+    });
+  } catch (error) {
+    console.error("[rides] Erro ao salvar nova corrida:", error);
+    res.status(500).json({ error: "Não foi possível registrar a corrida" });
+    return;
+  }
+
   rides.set(ride.id, ride);
+
+  const io = req.app.get("io");
+  if (io) io.to(`driver-vehicle:${ride.vehicleType}`).emit("nova_corrida", ride);
+
+  for (const u of users.values()) {
+    if (u.mode === "driver" && u.active && u.pushToken && driverCanTakeRide(u, ride)) {
+      sendPushNotification(
+        u.pushToken,
+        "Nova corrida!",
+        `${ride.clientName}: ${origin} → ${destination} · ${ride.vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}`,
+        { rideId: ride.id },
+      );
+    }
+  }
+
   res.json(ride);
 });
 
-// POST /rides/:id/accept
-router.post("/rides/:id/accept", requireAuth, (req, res) => {
-  const user = req.authUser!;
-  const ride = rides.get(String(req.params.id));
-  if (!ride) {
-    res.status(404).json({ error: "Corrida não encontrada" });
+// POST /accept-ride
+router.post("/accept-ride", requireAuth, async (req: Request, res: Response) => {
+  const { rideId } = req.body as { rideId: string };
+  const driver = req.authUser!;
+  if (driver.mode !== "driver") {
+    res.status(403).json({ error: "Acesso negado" });
     return;
   }
-  if (ride.status !== "waiting") {
-    res.status(400).json({ error: "Corrida já foi aceita" });
+
+  const ride = rides.get(rideId);
+  if (!ride) { res.status(404).json({ error: "Ride not found" }); return; }
+  if (ride.status !== "waiting") { res.status(409).json({ error: "Ride already taken" }); return; }
+
+  if (!driverCanTakeRide(driver, ride)) {
+    res.status(403).json({ error: "Esta corrida é de outra categoria de veículo" });
     return;
   }
-  if (!driverCanTakeRide(user, ride)) {
-    res.status(403).json({ error: "Veículo incompatível" });
+
+  const acceptedAt = new Date();
+  try {
+    const [updatedRide] = await db.update(dbRides)
+      .set({
+        driverId: driver.id,
+        driverName: driver.name,
+        driverPhoto: driver.photo ?? null,
+        driverAvgRating: driver.rating,
+        driverRideCount: driver.rideCount,
+        status: "accepted",
+        acceptedAt,
+      })
+      .where(and(eq(dbRides.id, rideId), eq(dbRides.status, "waiting")))
+      .returning({ id: dbRides.id });
+
+    if (!updatedRide) {
+      res.status(409).json({ error: "Ride already taken" });
+      return;
+    }
+  } catch (error) {
+    const dbError = error as { code?: string; constraint?: string };
+
+    if (
+      dbError.code === "23505" &&
+      dbError.constraint === "rides_one_active_per_driver_unique"
+    ) {
+      res.status(409).json({
+        error: "Você já possui uma corrida ativa. Finalize ou cancele antes de aceitar outra.",
+      });
+      return;
+    }
+
+    console.error("[rides] Erro ao aceitar corrida:", error);
+    res.status(500).json({ error: "Não foi possível aceitar a corrida" });
     return;
   }
-  ride.driverId = user.id;
-  ride.driverName = user.name;
-  ride.driverPhoto = user.photo;
-  ride.driverAvgRating = user.rating;
-  ride.driverRideCount = user.rideCount;
+
+  ride.driverId = driver.id;
+  ride.driverName = driver.name;
+  ride.driverPhoto = driver.photo;
+  ride.driverAvgRating = driver.rating;
+  ride.driverRideCount = driver.rideCount;
   ride.status = "accepted";
-  ride.acceptedAt = new Date().toISOString();
+  ride.acceptedAt = acceptedAt.toISOString();
+
+  const io = req.app.get("io");
+  if (io) {
+    io.to(`user:${ride.clientId}`).emit("corrida_aceita", ride);
+    io.to(`user:${driver.id}`).emit("corrida_aceita", ride);
+    io.to(`driver-vehicle:${ride.vehicleType}`).emit("corrida_indisponivel", ride.id);
+  }
+
+  const client = users.get(ride.clientId);
+  if (client?.pushToken) {
+    sendPushNotification(client.pushToken, "Motorista encontrado!", `${driver.name} está a caminho`, { rideId });
+  }
+
   res.json(ride);
 });
 
-// POST /rides/:id/finish
-router.post("/rides/:id/finish", requireAuth, (req, res) => {
-  const ride = rides.get(String(req.params.id));
+// POST /start-ride
+router.post("/start-ride", requireAuth, async (req: Request, res: Response) => {
+  const { rideId } = req.body as { rideId: string };
+  const driver = req.authUser!;
+
+  if (driver.mode !== "driver") {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+
+  const ride = rides.get(rideId);
   if (!ride) {
     res.status(404).json({ error: "Corrida não encontrada" });
     return;
   }
-  ride.status = "finished";
-  ride.finishedAt = new Date().toISOString();
+  if (ride.driverId !== driver.id) {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+  if (ride.status !== "accepted") {
+    res.status(409).json({ error: "A corrida não está aguardando início" });
+    return;
+  }
+
+  try {
+    const [updatedRide] = await db.update(dbRides)
+      .set({ status: "in_progress" })
+      .where(and(
+        eq(dbRides.id, rideId),
+        eq(dbRides.driverId, driver.id),
+        eq(dbRides.status, "accepted"),
+      ))
+      .returning({ id: dbRides.id });
+
+    if (!updatedRide) {
+      res.status(409).json({ error: "A corrida já foi iniciada ou mudou de estado" });
+      return;
+    }
+  } catch (error) {
+    console.error("[rides] Erro ao iniciar corrida:", error);
+    res.status(500).json({ error: "Não foi possível iniciar a corrida" });
+    return;
+  }
+
+  ride.status = "in_progress";
+
+  const io = req.app.get("io");
+  if (io) {
+    io.to(`user:${ride.clientId}`).emit("corrida_iniciada", ride);
+    if (ride.driverId) {
+      io.to(`user:${ride.driverId}`).emit("corrida_iniciada", ride);
+    }
+  }
+
+  const client = users.get(ride.clientId);
+  if (client?.pushToken) {
+    sendPushNotification(client.pushToken, "Corrida iniciada!", "Sua corrida está em andamento", { rideId });
+  }
+
   res.json(ride);
 });
 
 // POST /finish-ride
-router.post("/finish-ride", requireAuth, (req, res) => {
-  const { rideId } = req.body as { rideId?: string };
-  const ride = rides.get(rideId || "");
-  if (!ride) {
-    res.status(404).json({ error: "Corrida não encontrada" });
+router.post("/finish-ride", requireAuth, async (req: Request, res: Response) => {
+  const { rideId } = req.body as { rideId: string };
+  const ride = rides.get(rideId);
+  if (!ride) { res.status(404).json({ error: "Ride not found" }); return; }
+  if (req.authUser!.mode !== "driver" || ride.driverId !== req.authUser!.id) {
+    res.status(403).json({ error: "Acesso negado" });
     return;
   }
+  if (ride.status !== "in_progress") {
+    res.status(409).json({ error: "Inicie a corrida antes de finalizá-la" });
+    return;
+  }
+
+  const finishedAt = new Date();
+  try {
+    const [updatedRide] = await db.update(dbRides)
+      .set({ status: "finished", finishedAt })
+      .where(and(
+        eq(dbRides.id, rideId),
+        eq(dbRides.driverId, req.authUser!.id),
+        eq(dbRides.status, "in_progress"),
+      ))
+      .returning({ id: dbRides.id });
+
+    if (!updatedRide) {
+      res.status(404).json({ error: "Ride not found" });
+      return;
+    }
+  } catch (error) {
+    console.error("[rides] Erro ao finalizar corrida:", error);
+    res.status(500).json({ error: "Não foi possível finalizar a corrida" });
+    return;
+  }
+
   ride.status = "finished";
-  ride.finishedAt = new Date().toISOString();
-  res.json(ride);
-});
+  ride.finishedAt = finishedAt.toISOString();
 
-router.post("/rides/:id/cancel", requireAuth, (req, res) => {
-  const ride = rides.get(String(req.params.id));
-  if (!ride) {
-    res.status(404).json({ error: "Corrida não encontrada" });
-    return;
-  }
-  ride.status = "cancelled";
-  res.json(ride);
-});
-
-router.delete("/admin/rides", requireAdmin, (req, res) => {
-  const { id } = req.body as { id?: string };
-  if (id) {
-    rides.delete(id);
-  } else {
-    rides.clear();
-  }
-  res.json({ ok: true });
-});
-
-// GET /admin/stats
-router.get("/admin/stats", requireAdmin, (req, res) => {
-  res.json({
-    users: users.size,
-    rides: rides.size,
-    waiting: Array.from(rides.values()).filter((r) => r.status === "waiting").length,
-  });
-});
-
-// Pricing routes
-router.get("/pricing/lookup", requireAuth, (req, res) => {
-  const destination = String(req.query.destination ?? "").trim();
-
-  if (!destination) {
-    res.status(400).json({ error: "Destino obrigatório" });
-    return;
-  }
-
-  const result = lookupPrice(destination);
-
-  if (!result) {
-    res.json({ price: null, isLocal: false });
-    return;
-  }
-
-  res.json(result);
-});
-
-router.get("/pricing", requireAuth, (req, res) => {
-  res.json(Array.from(pricing.values()));
-});
-
-router.post("/pricing", requireAdmin, (req, res) => {
-  const { destination, price, isLocal } = req.body as { destination?: string; price?: number; isLocal?: boolean };
-  if (!destination?.trim() || typeof price !== "number") {
-    res.status(400).json({ error: "Destino e preço obrigatórios" });
-    return;
-  }
-  const rule: PriceRule = {
-    id: getId(),
-    destination: destination.trim(),
-    price,
-    isLocal: !!isLocal,
-    createdAt: new Date().toISOString(),
-  };
-  pricing.set(rule.id, rule);
-  res.json(rule);
-});
-
-router.delete("/pricing/:id", requireAdmin, (req, res) => {
-  pricing.delete(String(req.params.id));
-  res.json({ ok: true });
-});
-
-
-// POST /logout - apaga sessão do Neon
-router.post("/logout", requireAuth, async (req, res) => {
-  const auth = req.headers.authorization;
-  const token = auth?.slice(7);
-  if (token) {
-    sessions.delete(token);
-    if (pool) {
-      try { await deleteSessionDb(token); console.log(`🗑️ Sessão apagada: ${token.slice(0,8)}...`); } catch(e){ console.error(e); }
+  const io = req.app.get("io");
+  if (io) {
+    io.to(`user:${ride.clientId}`).emit("corrida_finalizada", ride);
+    if (ride.driverId) {
+      io.to(`user:${ride.driverId}`).emit("corrida_finalizada", ride);
     }
   }
-  res.json({ ok: true });
+
+  const client = users.get(ride.clientId);
+  if (client?.pushToken) {
+    sendPushNotification(client.pushToken, "Corrida finalizada!", "Avalie sua experiência", { rideId });
+  }
+
+  res.json(ride);
 });
 
+// POST /cancel-ride
+router.post("/cancel-ride", requireAuth, async (req: Request, res: Response) => {
+  const ride = rides.get(req.body.rideId);
+  if (!ride) { res.status(404).json({ error: "Ride not found" }); return; }
+  if (ride.clientId !== req.authUser!.id && ride.driverId !== req.authUser!.id) {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+  if (!["waiting", "accepted", "in_progress"].includes(ride.status)) {
+    res.status(409).json({ error: "Esta corrida não pode mais ser cancelada" });
+    return;
+  }
+
+  try {
+    const [updatedRide] = await db.update(dbRides)
+      .set({ status: "cancelled" })
+      .where(and(
+        eq(dbRides.id, ride.id),
+        or(
+          eq(dbRides.clientId, req.authUser!.id),
+          eq(dbRides.driverId, req.authUser!.id),
+        ),
+        inArray(dbRides.status, ["waiting", "accepted", "in_progress"]),
+      ))
+      .returning({ id: dbRides.id });
+
+    if (!updatedRide) {
+      res.status(404).json({ error: "Ride not found" });
+      return;
+    }
+  } catch (error) {
+    console.error("[rides] Erro ao cancelar corrida:", error);
+    res.status(500).json({ error: "Não foi possível cancelar a corrida" });
+    return;
+  }
+
+  ride.status = "cancelled";
+  const io = req.app.get("io");
+  if (io) {
+    io.to(`user:${ride.clientId}`).emit("corrida_cancelada", ride.id);
+    io.to(`driver-vehicle:${ride.vehicleType}`).emit("corrida_cancelada", ride.id);
+    if (ride.driverId) {
+      io.to(`user:${ride.driverId}`).emit("corrida_cancelada", ride.id);
+    }
+  }
+  res.json(ride);
+});
+
+// GET /rides/:id/chat – recupera o histórico persistido no Neon.
+router.get("/rides/:id/chat", requireAuth, async (req: Request, res: Response) => {
+  const rideId = req.params.id as string;
+
+  try {
+    const [ride] = await db.select().from(dbRides)
+      .where(eq(dbRides.id, rideId)).limit(1);
+
+    if (!ride) {
+      res.status(404).json({ error: "Ride not found" });
+      return;
+    }
+
+    if (
+      req.authUser!.id !== ride.clientId &&
+      req.authUser!.id !== ride.driverId &&
+      req.authUser!.mode !== "admin"
+    ) {
+      res.status(403).json({ error: "Acesso negado" });
+      return;
+    }
+
+    const messages = await db.select().from(dbChatMessages)
+      .where(eq(dbChatMessages.rideId, rideId))
+      .orderBy(asc(dbChatMessages.timestamp));
+
+    const history: ChatMessage[] = messages.map((message) => ({
+      id: message.id,
+      rideId: message.rideId,
+      senderId: message.senderId,
+      senderName: message.senderName,
+      senderPhoto: message.senderPhoto ?? undefined,
+      text: message.text,
+      timestamp: message.timestamp.toISOString(),
+    }));
+
+    chatByRide.set(rideId, history);
+    res.json(history);
+  } catch (error) {
+    console.error("[chat] Erro ao buscar histórico no Neon:", error);
+    res.status(500).json({ error: "Não foi possível carregar o histórico do chat" });
+  }
+});
+
+// POST /rides/:id/rate – grava a avaliação e atualiza a média em uma transação.
+router.post("/rides/:id/rate", requireAuth, async (req: Request, res: Response) => {
+  const rideId = req.params.id as string;
+  const { raterMode, rating } = req.body as {
+    raterMode: "client" | "driver";
+    rating: number;
+  };
+
+  if (raterMode !== "client" && raterMode !== "driver") {
+    res.status(400).json({ error: "Tipo de avaliador inválido" });
+    return;
+  }
+
+  if (req.authUser!.mode !== raterMode) {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    res.status(400).json({ error: "A avaliação deve ser um número inteiro entre 1 e 5" });
+    return;
+  }
+
+  try {
+    const [rideRecord] = await db.select().from(dbRides)
+      .where(eq(dbRides.id, rideId)).limit(1);
+
+    if (!rideRecord) {
+      res.status(404).json({ error: "Ride not found" });
+      return;
+    }
+
+    const expectedId = raterMode === "client" ? rideRecord.clientId : rideRecord.driverId;
+    if (req.authUser!.id !== expectedId) {
+      res.status(403).json({ error: "Acesso negado" });
+      return;
+    }
+
+    if (rideRecord.status !== "finished") {
+      res.status(409).json({ error: "A corrida precisa estar finalizada para receber avaliação" });
+      return;
+    }
+
+    const targetId = raterMode === "client" ? rideRecord.driverId : rideRecord.clientId;
+    if (!targetId) {
+      res.status(409).json({ error: "Não existe usuário para receber esta avaliação" });
+      return;
+    }
+
+    const result = await db.transaction(async (tx) => {
+      const ratingColumn = raterMode === "client"
+        ? dbRides.clientRating
+        : dbRides.driverRating;
+
+      const [updatedRide] = await tx.update(dbRides)
+        .set(raterMode === "client"
+          ? { clientRating: rating }
+          : { driverRating: rating })
+        .where(and(
+          eq(dbRides.id, rideId),
+          eq(dbRides.status, "finished"),
+          isNull(ratingColumn)
+        ))
+        .returning();
+
+      if (!updatedRide) return undefined;
+
+      const [targetUser] = await tx.select().from(dbUsers)
+        .where(eq(dbUsers.id, targetId)).limit(1);
+
+      if (!targetUser) {
+        throw new Error("Usuário avaliado não encontrado");
+      }
+
+      const nextCount = targetUser.rideCount + 1;
+      const nextRating = Number(
+        ((targetUser.rating * targetUser.rideCount + rating) / nextCount).toFixed(1)
+      );
+
+      const [updatedUser] = await tx.update(dbUsers)
+        .set({ rating: nextRating, rideCount: nextCount })
+        .where(eq(dbUsers.id, targetId))
+        .returning();
+
+      return { updatedRide, updatedUser };
+    });
+
+    if (!result) {
+      res.status(409).json({ error: "Esta corrida já recebeu esta avaliação" });
+      return;
+    }
+
+    const updatedRide = rideFromRecord(result.updatedRide);
+    rides.set(updatedRide.id, updatedRide);
+    users.set(result.updatedUser.id, userFromRecord(result.updatedUser));
+
+    res.json(updatedRide);
+  } catch (error) {
+    console.error("[rides] Erro ao salvar avaliação no Neon:", error);
+    res.status(500).json({ error: "Não foi possível salvar a avaliação" });
+  }
+});
+
+// GET /rides – consulta o Neon e mantém as regras de visibilidade por perfil.
+router.get("/rides", requireAuth, async (req: Request, res: Response) => {
+  try {
+    const records = await db.select().from(dbRides);
+    const allRides = records.map(rideFromRecord);
+
+    rides.clear();
+    for (const ride of allRides) {
+      rides.set(ride.id, ride);
+    }
+
+    const visibleRides = req.authUser!.mode === "driver"
+      ? allRides.filter((ride) =>
+        ride.driverId === req.authUser!.id ||
+        (ride.status === "waiting" && driverCanTakeRide(req.authUser!, ride))
+      )
+      : allRides;
+
+    visibleRides.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    res.json(visibleRides);
+  } catch (error) {
+    console.error("[rides] Erro ao consultar corridas no Neon:", error);
+    res.status(500).json({ error: "Não foi possível consultar as corridas" });
+  }
+});
+
+// GET /users/:id/rides – histórico persistido no Neon; self or admin only
+router.get("/users/:id/rides", requireAuth, async (req: Request, res: Response) => {
+  if (req.authUser!.id !== (req.params.id as string) && req.authUser!.mode !== "admin") {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+
+  const userId = req.params.id as string;
+
+  try {
+    const records = await db.select().from(dbRides);
+    const userRides = records
+      .filter((record) =>
+        (record.clientId === userId || record.driverId === userId) &&
+        record.status === "finished"
+      )
+      .map(rideFromRecord)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    res.json(userRides);
+  } catch (error) {
+    console.error("[rides] Erro ao consultar histórico no Neon:", error);
+    res.status(500).json({ error: "Não foi possível consultar o histórico de corridas" });
+  }
+});
+
+// GET /pricing – consulta as tarifas persistidas no Neon.
+router.get("/pricing", requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const records = await db.select().from(dbPricingRules)
+      .orderBy(asc(dbPricingRules.destination));
+
+    pricing.clear();
+    const rules: PriceRule[] = records.map((record) => ({
+      id: record.id,
+      destination: record.destination,
+      price: record.price,
+      isLocal: record.isLocal,
+      createdAt: record.createdAt.toISOString(),
+    }));
+
+    for (const rule of rules) pricing.set(rule.id, rule);
+    res.json(rules);
+  } catch (error) {
+    console.error("[pricing] Erro ao consultar tarifas no Neon:", error);
+    res.status(500).json({ error: "Não foi possível consultar as tarifas" });
+  }
+});
+
+// POST /pricing – administrador cadastra ou atualiza tarifas no Neon.
+router.post("/pricing", requireAdmin, async (req: Request, res: Response) => {
+  const { destination, price, isLocal } = req.body as {
+    destination: string;
+    price: number;
+    isLocal?: boolean;
+  };
+
+  if (
+    typeof destination !== "string" ||
+    !destination.trim() ||
+    destination.trim().length > 200 ||
+    typeof price !== "number" ||
+    !Number.isFinite(price) ||
+    price < 0 ||
+    (isLocal !== undefined && typeof isLocal !== "boolean")
+  ) {
+    res.status(400).json({ error: "Destino ou preço inválido" });
+    return;
+  }
+
+  const cleanDestination = destination.trim();
+  const local = isLocal === true;
+
+  try {
+    const savedRecord = await db.transaction(async (tx) => {
+      const existingRules = await tx.select().from(dbPricingRules);
+      const existing = existingRules.find((rule) =>
+        local
+          ? rule.isLocal
+          : !rule.isLocal &&
+            rule.destination.toLowerCase() === cleanDestination.toLowerCase()
+      );
+
+      if (existing) {
+        const [updated] = await tx.update(dbPricingRules)
+          .set({ destination: cleanDestination, price, isLocal: local })
+          .where(eq(dbPricingRules.id, existing.id))
+          .returning();
+
+        return updated;
+      }
+
+      const [created] = await tx.insert(dbPricingRules).values({
+        id: local ? "local-price" : getId(),
+        destination: cleanDestination,
+        price,
+        isLocal: local,
+      }).returning();
+
+      return created;
+    });
+
+    if (!savedRecord) {
+      throw new Error("Não foi possível confirmar a gravação da tarifa");
+    }
+
+    const rule: PriceRule = {
+      id: savedRecord.id,
+      destination: savedRecord.destination,
+      price: savedRecord.price,
+      isLocal: savedRecord.isLocal,
+      createdAt: savedRecord.createdAt.toISOString(),
+    };
+
+    pricing.set(rule.id, rule);
+    res.json(rule);
+  } catch (error) {
+    console.error("[pricing] Erro ao salvar tarifa no Neon:", error);
+    res.status(500).json({
+      error: "Não foi possível salvar a tarifa. Verifique se o destino já está cadastrado."
+    });
+  }
+});
+
+// DELETE /pricing/:id – administrador exclui a tarifa do Neon.
+router.delete("/pricing/:id", requireAdmin, async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+
+  try {
+    await db.delete(dbPricingRules).where(eq(dbPricingRules.id, id));
+    pricing.delete(id);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("[pricing] Erro ao excluir tarifa no Neon:", error);
+    res.status(500).json({ error: "Não foi possível excluir a tarifa" });
+  }
+});
+
+// GET /pricing/lookup?destination=xxx
+router.get("/pricing/lookup", requireAuth, (req: Request, res: Response) => {
+  const destination = (req.query.destination as string) ?? "";
+  const result = lookupPrice(destination);
+  res.json({ price: result?.price ?? null, isLocal: result?.isLocal ?? false });
+});
 
 export default router;

@@ -75,7 +75,7 @@ export default function LoginScreen() {
 
   const handleRegister = async () => {
     if (!name.trim() || !phone.trim() || !password) { setError("Preencha nome, telefone e senha"); return; }
-    if (password.length < 4) { setError("A senha deve ter ao menos 4 caracteres"); return; }
+    if (password.length < 8 || password.length > 128) { setError("A senha deve ter entre 8 e 128 caracteres"); return; }
     setLoading(true);
     setError("");
     const result = await register(
@@ -182,7 +182,7 @@ export default function LoginScreen() {
                 <TextInput style={s.input} value={phone} onChangeText={setPhone} placeholder="(00) 00000-0000" placeholderTextColor={colors.mutedForeground} keyboardType="phone-pad" autoCapitalize="none" autoCorrect={false} />
                 <Text style={s.label}>Senha</Text>
                 <View style={s.passwordRow}>
-                  <TextInput style={s.passwordInput} value={password} onChangeText={setPassword} placeholder="Crie uma senha (mín. 4 caracteres)" placeholderTextColor={colors.mutedForeground} secureTextEntry={!showPassword} autoCapitalize="none" autoCorrect={false} />
+                  <TextInput style={s.passwordInput} value={password} onChangeText={setPassword} placeholder="Crie uma senha (8 a 128 caracteres)" placeholderTextColor={colors.mutedForeground} secureTextEntry={!showPassword} autoCapitalize="none" autoCorrect={false} />
                   <TouchableOpacity style={s.eyeBtn} onPress={() => setShowPassword((v) => !v)}>
                     <Feather name={showPassword ? "eye-off" : "eye"} size={20} color={colors.mutedForeground} />
                   </TouchableOpacity>
