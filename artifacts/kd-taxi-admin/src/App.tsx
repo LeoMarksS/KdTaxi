@@ -170,7 +170,7 @@ function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'er
     const name = String(form.get('name') ?? '').trim();
     const phone = String(form.get('phone') ?? '').trim();
     const password = String(form.get('password') ?? '');
-    if (!name || !phone || (!editing && password.length < 4) || (editing && password && password.length < 4)) { setFormError('Informe nome, telefone e uma senha com pelo menos 4 caracteres.'); return; }
+    if (!name || !phone || (!editing && (password.length < 8 || password.length > 128)) || (editing && password && (password.length < 8 || password.length > 128))) { setFormError('Informe nome, telefone e uma senha entre 8 e 128 caracteres.'); return; }
     if (editing) {
       const vehicleType = String(form.get('vehicleType') ?? editing.vehicleType ?? 'car') as NonNullable<User['vehicleType']>;
       const data = { name, phone, ...(editing.mode === 'driver' ? { vehicleType } : {}), ...(password ? { password } : {}) };
@@ -214,7 +214,7 @@ function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'er
         <label>Telefone<input name="phone" defaultValue={modalUser?.phone ?? ''} required type="tel" placeholder="(00) 00000-0000" data-testid="input-user-phone" /></label>
          {!editing && <label>Tipo de conta<select name="mode" value={createMode} onChange={(event) => setCreateMode(event.target.value as 'client' | 'driver')} data-testid="select-user-mode"><option value="client">Cliente</option><option value="driver">Motorista</option></select></label>}
          {(!editing && createMode === 'driver') || editing?.mode === 'driver' ? <label>Veículo<select name="vehicleType" defaultValue={modalUser?.vehicleType ?? 'car'} data-testid="select-user-vehicle"><option value="car">KD CARRO</option><option value="motorcycle">KD MOTO</option></select></label> : null}
-        <label>{editing ? 'Nova senha (opcional)' : 'Senha'}<input name="password" type="password" minLength={4} required={!editing} placeholder={editing ? 'Deixe em branco para manter' : 'Mínimo de 4 caracteres'} data-testid="input-user-password" /></label>
+        <label>{editing ? 'Nova senha (opcional)' : 'Senha'}<input name="password" type="password" minLength={8} maxLength={128} required={!editing} placeholder={editing ? 'Deixe em branco para manter' : '8 a 128 caracteres'} data-testid="input-user-password" /></label>
          {(editing?.mode === 'driver' || (!editing && createMode === 'driver')) && <p className="form-note"><ShieldCheck size={14} /> A disponibilidade do motorista é controlada no aplicativo.</p>}
         {formError && <div className="form-alert" role="alert">{formError}</div>}
         <div className="dialog-actions"><Button variant="secondary" onClick={() => { setCreating(false); setEditing(null); }} testId="button-cancel-user">Cancelar</Button><Button type="submit" disabled={createUser.isPending || updateUser.isPending} testId="button-save-user">{createUser.isPending || updateUser.isPending ? 'Salvando…' : editing ? 'Salvar alterações' : 'Criar usuário'}</Button></div>
