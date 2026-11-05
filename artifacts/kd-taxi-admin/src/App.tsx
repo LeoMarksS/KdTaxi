@@ -257,6 +257,19 @@ function RidesPage() {
   </main>;
 }
 
+const readTariff = (form: FormData, name: string): number | null => {
+  const raw = String(form.get(name) ?? '').trim();
+  return raw === '' ? null : Number(raw);
+};
+const validTariff = (value: number | null) => value === null || (Number.isFinite(value) && value >= 0);
+function TariffFields({ carPrice, motorcyclePrice }: { carPrice?: number | null; motorcyclePrice?: number | null }) {
+  return <>
+    <label>Preço carro<div className="currency-input"><span>R$</span><input name="carPrice" defaultValue={carPrice ?? ''} type="number" min="0" step="0.01" placeholder="Não definido" data-testid="input-car-price" /></div></label>
+    <label>Preço moto<div className="currency-input"><span>R$</span><input name="motorcyclePrice" defaultValue={motorcyclePrice ?? ''} type="number" min="0" step="0.01" placeholder="Não definido" data-testid="input-motorcycle-price" /></div></label>
+    <small>Deixe vazio para manter a tarifa sem valor definido. Zero é uma tarifa de R$ 0,00.</small>
+  </>;
+}
+
 function PricingPage({ notify }: { notify: (message: string, kind?: 'success' | 'error') => void }) {
   const queryClient = useQueryClient();
   const query = useListPricing({ query: { queryKey: getListPricingQueryKey(), refetchInterval: AUTO_REFRESH_MS } });
@@ -273,16 +286,19 @@ function PricingPage({ notify }: { notify: (message: string, kind?: 'success' | 
     event.preventDefault(); setFormError('');
     const form = new FormData(event.currentTarget);
     const destination = String(form.get('destination') ?? '').trim();
-    const price = Number(form.get('price'));
-    if (!destination || !Number.isFinite(price) || price < 0) { setFormError('Informe um destino e um preço válido.'); return; }
-    const data: PricingInput = { destination, price, isLocal: false };
+    const carPrice = readTariff(form, 'carPrice');
+    const motorcyclePrice = readTariff(form, 'motorcyclePrice');
+    if (!destination || !validTariff(carPrice) || !validTariff(motorcyclePrice)) { setFormError('Informe um destino e um preço válido.'); return; }
+    const data: PricingInput = { destination, carPrice, motorcyclePrice, isLocal: false };
     upsert.mutate({ data }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListPricingQueryKey() }); setEditing(null); notify(editing?.id ? 'Regra de preço atualizada.' : 'Regra de preço criada.'); }, onError: (error) => { if (isAuthError(error)) raiseAuthExpired(); setFormError(isAuthError(error) ? 'Sua sessão expirou. Entre novamente.' : 'Não foi possível salvar a regra. Confira os dados e tente novamente.'); } });
   };
   const saveLocalPrice = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setLocalPriceError('');
-    const price = Number(new FormData(event.currentTarget).get('localPrice'));
-    if (!Number.isFinite(price) || price < 0) { setLocalPriceError('Informe um preço local válido.'); return; }
-    const data: PricingInput = { destination: 'Corridas locais', price, isLocal: true };
+    const form = new FormData(event.currentTarget);
+    const carPrice = readTariff(form, 'carPrice');
+    const motorcyclePrice = readTariff(form, 'motorcyclePrice');
+    if (!validTariff(carPrice) || !validTariff(motorcyclePrice)) { setLocalPriceError('Informe um preço local válido.'); return; }
+    const data: PricingInput = { destination: localRule?.destination ?? 'Corridas locais', carPrice, motorcyclePrice, isLocal: true };
     upsert.mutate({ data }, {
       onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListPricingQueryKey() }); notify('Preço fixo local salvo.'); },
       onError: (error) => { if (isAuthError(error)) raiseAuthExpired(); setLocalPriceError(isAuthError(error) ? 'Sua sessão expirou. Entre novamente.' : 'Não foi possível salvar o preço local. Tente novamente.'); },
@@ -294,32 +310,31 @@ function PricingPage({ notify }: { notify: (message: string, kind?: 'success' | 
     deleteRule.mutate({ id: removing.id }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListPricingQueryKey() }); setRemoving(null); notify(wasLocal ? 'Preço local removido; destinos sem regra ficarão sem tarifa.' : 'Regra removida.'); }, onError: (error) => { if (isAuthError(error)) { raiseAuthExpired(); return; } notify('Não foi possível remover esta regra.', 'error'); } });
   };
   return <main className="page-enter">
-    <div className="page-heading"><div><div className="eyebrow">TARIFAS · {destinationRules.length.toLocaleString('pt-BR')} DESTINOS</div><h1>Preços</h1><p>Uma tarifa padrão local e valores específicos por destino.</p></div><Button onClick={() => { setFormError(''); setEditing({ id: '', destination: '', price: 0, isLocal: false, createdAt: '' }); }} testId="button-add-price"><Plus size={16} /> Nova regra</Button></div>
+    <div className="page-heading"><div><div className="eyebrow">TARIFAS · {destinationRules.length.toLocaleString('pt-BR')} DESTINOS</div><h1>Preços</h1><p>Uma tarifa padrão local e valores específicos por destino.</p></div><Button onClick={() => { setFormError(''); setEditing({ id: '', destination: '', carPrice: null, motorcyclePrice: null, isLocal: false, createdAt: '' }); }} testId="button-add-price"><Plus size={16} /> Nova regra</Button></div>
     <section className="pricing-intro"><span className="price-illustration"><Tag size={22} /></span><div><div className="eyebrow">TABELA DE TARIFAS</div><h2>Preço previsível, viagem tranquila.</h2><p>Destinos específicos têm prioridade sobre o preço fixo local.</p></div><div className="price-total"><small>DESTINOS CONFIGURADOS</small><b>{destinationRules.length.toString().padStart(2, '0')}</b></div></section>
     {query.isLoading && !query.data ? <div className="price-grid">{Array.from({ length: 4 }, (_, index) => <div className="price-card" key={index}><div className="skeleton sk-line" /><div className="skeleton sk-big" /></div>)}</div> : query.isError && !query.data ? <QueryError onRetry={() => void query.refetch()} /> : <>
       <section className="local-price-panel" data-testid="panel-local-price">
         <div className="local-price-copy"><div className="eyebrow">PREÇO PADRÃO DA CIDADE</div><h2>Preço fixo local</h2><p>Usado quando o destino da corrida não corresponde a nenhuma regra específica da lista.</p>
-          {localRule ? <span className="local-price-current"><Check size={13} /> Em vigor: {formatMoney(localRule.price)} por corrida</span> : <span className="local-price-missing">Nenhum preço local cadastrado ainda.</span>}
+          {localRule ? <span className="local-price-current"><Check size={13} /> Em vigor: Carro {formatMoney(localRule.carPrice)} · Moto {formatMoney(localRule.motorcyclePrice)}</span> : <span className="local-price-missing">Nenhum preço local cadastrado ainda.</span>}
         </div>
-        <form onSubmit={saveLocalPrice} className="local-price-form">
-          <label htmlFor="local-price-input">Valor local</label>
-          <div className="currency-input"><span>R$</span><input id="local-price-input" name="localPrice" type="number" min="0" step="0.01" defaultValue={localRule?.price ?? ''} required placeholder="0,00" data-testid="input-local-price" /></div>
+        <form key={`${localRule?.id}:${localRule?.carPrice}:${localRule?.motorcyclePrice}`} onSubmit={saveLocalPrice} className="local-price-form">
+          <TariffFields carPrice={localRule?.carPrice} motorcyclePrice={localRule?.motorcyclePrice} />
           {localPriceError && <div className="form-alert" role="alert">{localPriceError}</div>}
           <div className="local-price-actions"><Button type="submit" disabled={upsert.isPending} testId="button-save-local-price">{upsert.isPending ? 'Salvando…' : 'Salvar preço local'}</Button>{localRule && <Button variant="plain" onClick={() => setRemoving(localRule)} testId="button-delete-local-price">Remover</Button>}</div>
         </form>
       </section>
       {destinationRules.length === 0 ?
-        <div className="content-panel pricing-empty"><EmptyState title="Ainda não há destinos específicos" text="O preço fixo local será usado até você cadastrar uma tarifa para um destino." action={<Button onClick={() => setEditing({ id: '', destination: '', price: 0, isLocal: false, createdAt: '' })} testId="button-add-first-price"><Plus size={15} /> Adicionar destino</Button>} /></div> :
+        <div className="content-panel pricing-empty"><EmptyState title="Ainda não há destinos específicos" text="O preço fixo local será usado até você cadastrar uma tarifa para um destino." action={<Button onClick={() => setEditing({ id: '', destination: '', carPrice: null, motorcyclePrice: null, isLocal: false, createdAt: '' })} testId="button-add-first-price"><Plus size={15} /> Adicionar destino</Button>} /></div> :
         <div className="price-grid">{destinationRules.map((rule, index) => <article className="price-card" key={rule.id} data-testid={`card-price-${rule.id}`}>
           <div className="price-card-top"><span className="price-index">{String(index + 1).padStart(2, '0')}</span><div className="row-actions"><IconButton label={`Editar preço de ${rule.destination}`} onClick={() => { setFormError(''); setEditing(rule); }} testId={`button-edit-price-${rule.id}`}><Settings2 size={16} /></IconButton><IconButton label={`Excluir regra de ${rule.destination}`} onClick={() => setRemoving(rule)} testId={`button-delete-price-${rule.id}`}><Trash2 size={16} /></IconButton></div></div>
           <div className="price-place"><MapPin size={15} /><h3 data-testid={`text-price-destination-${rule.id}`}>{rule.destination}</h3></div>
-          <div className="price-card-value"><b>{formatMoney(rule.price)}</b><small>por viagem</small></div>
+          <div className="price-card-value"><small>Carro</small><b>{formatMoney(rule.carPrice)}</b><small>Moto</small><b>{formatMoney(rule.motorcyclePrice)}</b></div>
           <div className="price-card-bottom"><span className="destination-badge">Destino específico</span><small>Incluído {new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium' }).format(new Date(rule.createdAt))}</small></div>
         </article>)}</div>}
     </>}
     {editing && <Dialog title={editing.id ? 'Editar regra' : 'Nova regra de preço'} subtitle="Configure o preço aplicado a um destino." onClose={() => setEditing(null)}>
       <form onSubmit={save} className="form-stack"><label>Destino<input name="destination" defaultValue={editing.destination} required autoFocus readOnly={Boolean(editing.id)} placeholder="Ex.: Centro, Aeroporto" data-testid="input-price-destination" />{editing.id && <small className="field-hint">O destino identifica a regra; para alterar o preço local, use o cartão acima.</small>}</label>
-        <label>Preço por viagem<div className="currency-input"><span>R$</span><input name="price" defaultValue={editing.price || ''} type="number" min="0" step="0.01" required placeholder="0,00" data-testid="input-price-value" /></div></label>
+        <TariffFields carPrice={editing.carPrice} motorcyclePrice={editing.motorcyclePrice} />
         {formError && <div className="form-alert" role="alert">{formError}</div>}<div className="dialog-actions"><Button variant="secondary" onClick={() => setEditing(null)} testId="button-cancel-price">Cancelar</Button><Button type="submit" disabled={upsert.isPending} testId="button-save-price">{upsert.isPending ? 'Salvando…' : editing.id ? 'Salvar regra' : 'Criar regra'}</Button></div>
       </form>
     </Dialog>}
