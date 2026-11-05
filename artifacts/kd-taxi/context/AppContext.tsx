@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import React, {
   createContext,
   useCallback,
@@ -488,21 +488,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [setUser, setToken]);
 
-  // Register push notifications when user logs in
+  // Register push at login and retry when the app returns to foreground.
   useEffect(() => {
-    if (!user) return;
-    registerForPushNotifications().then(async (pushToken) => {
-      if (pushToken && user.id) {
-        try {
-          await authFetch(`/users/${user.id}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pushToken }),
-          });
-        } catch {}
+    if (!user?.id || !token || Platform.OS === "web") return;
+    let cancelled = false;
+    let running = false;
+
+    const registerDevice = async () => {
+      if (running || cancelled) return;
+      running = true;
+      try {
+        const pushToken = await registerForPushNotifications();
+        if (!pushToken || cancelled) return;
+        const res = await authFetch(`/users/${user.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pushToken }),
+        });
+        if (!res.ok) {
+          console.warn("[push] O servidor não confirmou o registro do aparelho.");
+        }
+      } catch {
+        console.warn("[push] Falha de conexão ao salvar o registro do aparelho.");
+      } finally {
+        running = false;
       }
+    };
+
+    void registerDevice();
+    const subscription = AppState.addEventListener("change", state => {
+      if (state === "active") void registerDevice();
     });
-  }, [user?.id]);
+    return () => {
+      cancelled = true;
+      subscription.remove();
+    };
+  }, [user?.id, token, authFetch]);
 
   // Restaura a disponibilidade se a preferência local carregar depois do socket.
   useEffect(() => {

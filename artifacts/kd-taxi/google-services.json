@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "172235692839",
+    "project_id": "kd-taxi-9c295",
+    "storage_bucket": "kd-taxi-9c295.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:172235692839:android:3886bd129f1370b6a4a702",
+        "android_client_info": {
+          "package_name": "com.kdtaxi.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCx9aAwtNUCeWVqwMH_Jq4GRhbl1iAfjKQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

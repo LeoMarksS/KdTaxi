@@ -17,7 +17,7 @@ export async function initializeNotifications() {
   if (Platform.OS === "android") {
     await Notifications.setNotificationChannelAsync(RIDE_ALERTS_CHANNEL_ID, {
       name: "Alertas de corridas",
-      importance: 7,
+      importance: Notifications.AndroidImportance.MAX,
       sound: "default",
       vibrationPattern: [0, 250, 150, 250],
       enableVibrate: true,
@@ -49,13 +49,17 @@ export async function registerForPushNotifications(): Promise<string | null> {
       finalStatus = status;
     }
 
-    if (finalStatus !== "granted") return null;
+    if (finalStatus !== "granted") {
+      console.warn("[push] Permissão de notificações não concedida.");
+      return null;
+    }
 
     const token = await Notifications.getExpoPushTokenAsync({
       projectId: EAS_PROJECT_ID,
     });
     return token.data;
   } catch {
+    console.warn("[push] Não foi possível registrar o aparelho no Expo.");
     return null;
   }
 }
