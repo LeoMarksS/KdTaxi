@@ -11,22 +11,9 @@ const router = Router();
 
 let socketServer: SocketIOServer | undefined;
 
-// Disponibilidade do motorista depende do botão Online e de uma sessão conectada.
+// Disponibilidade segue explicitamente o botão Online do motorista,
+// inclusive quando o Android suspende a conexão do aplicativo.
 const driverAvailability = new Set<string>();
-const driverSockets = new Map<string, Set<string>>();
-
-export function registerDriverSocket(userId: string, socketId: string): void {
-  const sockets = driverSockets.get(userId) ?? new Set<string>();
-  sockets.add(socketId);
-  driverSockets.set(userId, sockets);
-}
-
-export function unregisterDriverSocket(userId: string, socketId: string): void {
-  const sockets = driverSockets.get(userId);
-  if (!sockets) return;
-  sockets.delete(socketId);
-  if (sockets.size === 0) driverSockets.delete(userId);
-}
 
 export function setDriverAvailability(userId: string, online: boolean): void {
   if (online) driverAvailability.add(userId);
@@ -34,7 +21,7 @@ export function setDriverAvailability(userId: string, online: boolean): void {
 }
 
 export function isDriverOnline(userId: string): boolean {
-  return driverAvailability.has(userId) && (driverSockets.get(userId)?.size ?? 0) > 0;
+  return driverAvailability.has(userId);
 }
 
 export async function isUserForeground(userId: string): Promise<boolean> {

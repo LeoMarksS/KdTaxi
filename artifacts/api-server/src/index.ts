@@ -9,8 +9,6 @@ import {
   getRideParticipants,
   isRideParticipant,
   recordChatMessage,
-  registerDriverSocket,
-  unregisterDriverSocket,
   isUserForeground,
   sendChatPushNotification,
   type ChatMessage,
@@ -83,7 +81,6 @@ io.on("connection", (socket) => {
   socket.join(`role:${user.mode}`);
   if (user.mode === "driver") {
     socket.join(`driver-vehicle:${user.vehicleType === "motorcycle" ? "motorcycle" : "car"}`);
-    registerDriverSocket(user.id, socket.id);
   }
 
   socket.data.appState = "active";
@@ -128,7 +125,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    if (user.mode === "driver") unregisterDriverSocket(user.id, socket.id);
     logger.info({ socketId: socket.id, userId: user.id }, "Socket disconnected");
   });
 });
