@@ -245,10 +245,18 @@ export const DeleteAdminUserResponse = zod.object({
 /**
  * @summary List pricing rules
  */
+export const listPricingResponseCarPriceMin = 0;
+
+export const listPricingResponseMotorcyclePriceMin = 0;
+
 export const ListPricingResponseItem = zod.object({
   id: zod.string(),
   destination: zod.string(),
-  price: zod.number(),
+  carPrice: zod.number().min(listPricingResponseCarPriceMin).nullable(),
+  motorcyclePrice: zod
+    .number()
+    .min(listPricingResponseMotorcyclePriceMin)
+    .nullable(),
   isLocal: zod.boolean().optional(),
   createdAt: zod.coerce.date(),
 });
@@ -258,18 +266,32 @@ export const ListPricingResponse = zod.array(ListPricingResponseItem);
  * @summary Create or update a pricing rule
  */
 
-export const upsertPricingBodyPriceMin = 0;
+export const upsertPricingBodyCarPriceMin = 0;
+
+export const upsertPricingBodyMotorcyclePriceMin = 0;
 
 export const UpsertPricingBody = zod.object({
   destination: zod.string().min(1),
-  price: zod.number().min(upsertPricingBodyPriceMin),
+  carPrice: zod.number().min(upsertPricingBodyCarPriceMin).nullable(),
+  motorcyclePrice: zod
+    .number()
+    .min(upsertPricingBodyMotorcyclePriceMin)
+    .nullable(),
   isLocal: zod.boolean().optional(),
 });
+
+export const upsertPricingResponseCarPriceMin = 0;
+
+export const upsertPricingResponseMotorcyclePriceMin = 0;
 
 export const UpsertPricingResponse = zod.object({
   id: zod.string(),
   destination: zod.string(),
-  price: zod.number(),
+  carPrice: zod.number().min(upsertPricingResponseCarPriceMin).nullable(),
+  motorcyclePrice: zod
+    .number()
+    .min(upsertPricingResponseMotorcyclePriceMin)
+    .nullable(),
   isLocal: zod.boolean().optional(),
   createdAt: zod.coerce.date(),
 });
