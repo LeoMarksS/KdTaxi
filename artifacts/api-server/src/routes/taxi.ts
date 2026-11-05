@@ -1242,7 +1242,7 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
         "Nova corrida!",
         `${ride.clientName}: ${origin} → ${destination} · ${ride.vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}`,
         { type: "new_ride", rideId: ride.id },
-        { channelId: "ride_alerts_v2", sound: "ride-alert.wav" },
+        { channelId: "ride_alerts_v2", sound: "ride_alert.wav" },
       );
     }
   }
