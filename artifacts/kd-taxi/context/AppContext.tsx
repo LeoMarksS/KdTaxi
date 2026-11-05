@@ -200,7 +200,7 @@ async function playRideRequestSound() {
   try {
     const { createAudioPlayer, setAudioModeAsync } = await import("expo-audio");
     await setAudioModeAsync({ playsInSilentMode: true });
-    const player = createAudioPlayer("https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3");
+    const player = createAudioPlayer(require("../assets/sounds/ride-alert.wav"));
     player.volume = 1;
     player.play();
     setTimeout(() => player.remove(), 5000);
@@ -558,11 +558,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const me = userRef.current;
       if (!me) return;
       try {
-        if (me.mode === "driver" && isDriverOnlineRef.current) {
+        if (me.mode === "driver") {
           await authFetch(`/users/${me.id}/availability`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ online: true }),
+            body: JSON.stringify({ online: isDriverOnlineRef.current }),
           });
         }
 
@@ -602,7 +602,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } catch {}
     };
 
-    socket.on("connect", reconcile);
+    const reportAppState = (state?: string | null) => {
+      socket.emit("app_state", state ?? AppState.currentState ?? "unknown");
+    };
+    const onConnect = () => {
+      reportAppState();
+      void reconcile();
+    };
+    socket.on("connect", onConnect);
+    const appStateSubscription = AppState.addEventListener("change", reportAppState);
 
     socket.on("nova_corrida", (ride: Ride) => {
       const currentUser = userRef.current;
@@ -708,13 +716,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         // Only increment and notify when the relevant chat screen is not open
         if (isChatOpenRef.current !== msg.rideId) {
           setUnreadByRide((prev) => ({ ...prev, [msg.rideId]: (prev[msg.rideId] ?? 0) + 1 }));
-          scheduleLocalNotification(`Mensagem de ${msg.senderName}`, msg.text);
+          scheduleLocalNotification(`Mensagem de ${msg.senderName}`, msg.text, "chat");
         }
       }
     });
 
     return () => {
-      socket.off("connect", reconcile);
+      appStateSubscription.remove();
+      socket.off("connect", onConnect);
       socket.disconnect();
       socketRef.current = null;
       // Cancel any pending sound repeat timers when connection is torn down
