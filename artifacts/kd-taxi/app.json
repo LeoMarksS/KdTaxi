@@ -18,6 +18,7 @@
     },
     "android": {
       "package": "com.kdtaxi.app",
+      "versionCode": 2,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#0D0D0D"
@@ -62,7 +63,7 @@
         {
           "icon": "./assets/images/icon.png",
           "color": "#F5C518",
-          "sounds": []
+          "sounds": ["./assets/sounds/ride-alert.wav"]
         }
       ],
       [
