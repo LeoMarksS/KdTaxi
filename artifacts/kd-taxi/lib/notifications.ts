@@ -4,7 +4,7 @@ import { Platform } from "react-native";
 const LEGACY_ALERTS_CHANNEL_ID = "ride_alerts_v1";
 const RIDE_ALERTS_CHANNEL_ID = "ride_alerts_v2";
 const CHAT_CHANNEL_ID = "chat_messages_v1";
-const RIDE_ALERT_SOUND = "ride-alert.wav";
+const RIDE_ALERT_SOUND = "ride_alert.wav";
 const EAS_PROJECT_ID = "5fb3cb5d-d1c2-4bf7-b2a7-aef44055f44a";
 
 export type LocalNotificationKind = "ride" | "chat";
