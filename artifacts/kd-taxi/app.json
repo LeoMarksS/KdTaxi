@@ -63,7 +63,7 @@
         {
           "icon": "./assets/images/icon.png",
           "color": "#F5C518",
-          "sounds": ["./assets/sounds/ride-alert.wav"]
+          "sounds": ["./assets/sounds/ride_alert.wav"]
         }
       ],
       [

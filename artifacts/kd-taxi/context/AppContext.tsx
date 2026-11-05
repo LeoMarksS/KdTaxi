@@ -200,7 +200,7 @@ async function playRideRequestSound() {
   try {
     const { createAudioPlayer, setAudioModeAsync } = await import("expo-audio");
     await setAudioModeAsync({ playsInSilentMode: true });
-    const player = createAudioPlayer(require("../assets/sounds/ride-alert.wav"));
+    const player = createAudioPlayer(require("../assets/sounds/ride_alert.wav"));
     player.volume = 1;
     player.play();
     setTimeout(() => player.remove(), 5000);
