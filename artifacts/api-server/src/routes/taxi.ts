@@ -385,14 +385,64 @@ const changePasswordLimiter = rateLimit({
   message: { error: "Muitas tentativas. Aguarde alguns minutos antes de tentar novamente." },
 });
 
-async function sendPushNotification(token: string, title: string, body: string, data?: object) {
+async function sendPushNotification(
+  token: string,
+  title: string,
+  body: string,
+  data?: object,
+) {
   try {
-    await fetch("https://exp.host/--/api/v2/push/send", {
+    const response = await fetch("https://exp.host/--/api/v2/push/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to: token, title, body, sound: "default", data: data ?? {} }),
+      signal: AbortSignal.timeout(15000),
+      body: JSON.stringify({
+        to: token,
+        title,
+        body,
+        sound: "default",
+        channelId: "ride_alerts_v1",
+        priority: "high",
+        data: data ?? {},
+      }),
     });
-  } catch (_) {}
+
+    if (!response.ok) {
+      console.warn("[push] Serviço recusou o envio.", {
+        httpStatus: response.status,
+      });
+      return;
+    }
+
+    const payload = await response.json() as {
+      data?: {
+        status?: string;
+        details?: { error?: string };
+      } | Array<{
+        status?: string;
+        details?: { error?: string };
+      }>;
+    };
+
+    const ticket = Array.isArray(payload.data)
+      ? payload.data[0]
+      : payload.data;
+
+    if (ticket?.status !== "ok") {
+      const rawCode = ticket?.details?.error;
+      const code = typeof rawCode === "string" &&
+        /^[A-Za-z0-9_]{1,80}$/.test(rawCode)
+          ? rawCode
+          : "UNKNOWN_PUSH_ERROR";
+
+      console.warn("[push] Expo não aceitou a notificação.", { code });
+      return;
+    }
+
+    console.info("[push] Expo aceitou o envio; entrega ainda não confirmada.");
+  } catch {
+    console.warn("[push] Falha de conexão ou tempo limite ao enviar.");
+  }
 }
 
 async function lookupPrice(
