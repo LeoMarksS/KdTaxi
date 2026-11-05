@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS "rides_one_active_per_driver_unique" ON "rides" USING btree ("driver_id") WHERE "rides"."driver_id" is not null and "rides"."status" in ('accepted', 'in_progress');

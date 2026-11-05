@@ -9,7 +9,15 @@
 export interface PricingInput {
   /** @minLength 1 */
   destination: string;
-  /** @minimum 0 */
-  price: number;
+  /**
+   * @minimum 0
+   * @nullable
+   */
+  carPrice: number | null;
+  /**
+   * @minimum 0
+   * @nullable
+   */
+  motorcyclePrice: number | null;
   isLocal?: boolean;
 }

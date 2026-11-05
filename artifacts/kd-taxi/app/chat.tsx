@@ -282,6 +282,7 @@ export default function ChatScreen() {
               placeholder="Mensagem..."
               placeholderTextColor={colors.mutedForeground}
               multiline
+              maxLength={1000}
             />
             <TouchableOpacity
               style={[s.sendBtn, { opacity: text.trim() ? 1 : 0.4 }]}

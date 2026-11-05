@@ -23,6 +23,8 @@ export interface User {
   photo?: string;
   rating?: number;
   rideCount?: number;
+  active?: boolean;
+  isOnline?: boolean;
 }
 
 const MAX_CACHED_USER_PHOTO_CHARS = 32 * 1024;
@@ -85,7 +87,8 @@ export interface ChatMessage {
 export interface PriceRule {
   id: string;
   destination: string;
-  price: number;
+  carPrice: number | null;
+  motorcyclePrice: number | null;
   isLocal?: boolean;
 }
 
@@ -107,9 +110,11 @@ export interface AdminStats {
 }
 
 interface AppContextValue {
+  isSessionReady: boolean;
   user: User | null;
   setUser: (user: User | null) => void;
   updateProfile: (name: string, photo?: string) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>;
   isDriverOnline: boolean;
   setDriverOnline: (online: boolean) => void;
   // Clients use activeRide (single); drivers use activeRides (multiple)
@@ -127,8 +132,9 @@ interface AppContextValue {
   requestRide: (origin: string, destination: string, payment: "pix" | "dinheiro", vehicleType?: VehicleType) => Promise<Ride | null>;
   acceptRide: (rideId: string) => Promise<void>;
   declineRide: (rideId: string) => void;
-  finishRide: (rideId: string) => Promise<void>;
-  cancelRide: (rideId: string) => Promise<void>;
+  startRide: (rideId: string) => Promise<boolean>;
+  finishRide: (rideId: string) => Promise<boolean>;
+  cancelRide: (rideId: string) => Promise<boolean>;
   rateRide: (rideId: string, rating: number) => Promise<void>;
   cancelSoundAlerts: () => void;
   logout: () => void;
@@ -141,9 +147,9 @@ interface AppContextValue {
   refreshAdminData: () => Promise<void>;
   refreshAdminStats: () => Promise<void>;
   refreshPricing: () => Promise<void>;
-  setPricingRule: (destination: string, price: number, isLocal?: boolean) => Promise<void>;
+  setPricingRule: (destination: string, carPrice: number | null, motorcyclePrice: number | null, isLocal?: boolean) => Promise<void>;
   deletePricingRule: (id: string) => Promise<void>;
-  lookupPrice: (destination: string) => Promise<{ price: number; isLocal: boolean } | null>;
+  lookupPrice: (destination: string, vehicleType: VehicleType) => Promise<{ price: number; isLocal: boolean } | null>;
   finishedRideToRate: Ride | null;
   clearFinishedRideToRate: () => void;
   // Admin operations
@@ -208,6 +214,7 @@ function matchesDriverVehicle(user: User, ride: Ride): boolean {
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [user, setUserState] = useState<User | null>(null);
   const [token, setTokenState] = useState<string | null>(null);
+  const [isSessionReady, setIsSessionReady] = useState(false);
   const tokenRef = useRef<string | null>(null);
   const [isDriverOnline, setDriverOnlineState] = useState(false);
   const [activeRide, setActiveRide] = useState<Ride | null>(null);
@@ -236,23 +243,82 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { activeRidesRef.current = activeRides; }, [activeRides]);
   useEffect(() => { isDriverOnlineRef.current = isDriverOnline; }, [isDriverOnline]);
 
-  // Load persisted state
+  // Aguarda a recuperação completa da sessão antes de liberar a navegação.
   useEffect(() => {
-    AsyncStorage.getItem("kd_user").then((data) => {
-      if (data) setUserState(JSON.parse(data) as User);
-    });
-    AsyncStorage.getItem("kd_token").then((data) => {
-      if (data) {
-        tokenRef.current = data;
-        setTokenState(data);
+    let cancelled = false;
+
+    const restorePersistedState = async () => {
+      try {
+        const [storedUser, storedToken, storedOnline, storedRide] =
+          await Promise.all([
+            AsyncStorage.getItem("kd_user").catch(() => null),
+            AsyncStorage.getItem("kd_token").catch(() => null),
+            AsyncStorage.getItem("kd_driver_online").catch(() => null),
+            AsyncStorage.getItem("kd_active_ride").catch(() => null),
+          ]);
+
+        if (cancelled) return;
+
+        let restoredUser: User | null = null;
+
+        if (storedUser && storedToken) {
+          try {
+            const parsed = JSON.parse(storedUser) as User;
+            if (
+              parsed &&
+              typeof parsed.id === "string" &&
+              parsed.id.length > 0 &&
+              typeof parsed.name === "string" &&
+              ["client", "driver", "admin"].includes(parsed.mode ?? "")
+            ) {
+              restoredUser = parsed;
+            }
+          } catch {
+            restoredUser = null;
+          }
+        }
+
+        // Usuário e token precisam existir juntos para restaurar o login.
+        if (restoredUser && storedToken) {
+          tokenRef.current = storedToken;
+          setTokenState(storedToken);
+          setUserState(restoredUser);
+        } else {
+          tokenRef.current = null;
+          setTokenState(null);
+          setUserState(null);
+          await Promise.all([
+            AsyncStorage.removeItem("kd_user").catch(() => {}),
+            AsyncStorage.removeItem("kd_token").catch(() => {}),
+          ]);
+        }
+
+        setDriverOnlineState(storedOnline === "true");
+
+        if (storedRide) {
+          try {
+            const parsedRide = JSON.parse(storedRide) as Ride;
+            setActiveRide(
+              parsedRide && typeof parsedRide.id === "string"
+                ? parsedRide
+                : null
+            );
+          } catch {
+            setActiveRide(null);
+          }
+        }
+      } catch (error) {
+        console.warn("Não foi possível recuperar a sessão salva.", error);
+      } finally {
+        if (!cancelled) setIsSessionReady(true);
       }
-    });
-    AsyncStorage.getItem("kd_driver_online").then((data) => {
-      if (data === "true") setDriverOnlineState(true);
-    });
-    AsyncStorage.getItem("kd_active_ride").then((data) => {
-      if (data) setActiveRide(JSON.parse(data) as Ride);
-    });
+    };
+
+    void restorePersistedState();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const setToken = useCallback((t: string | null) => {
@@ -320,13 +386,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const setDriverOnline = useCallback((online: boolean) => {
     setDriverOnlineState(online);
     AsyncStorage.setItem("kd_driver_online", online ? "true" : "false");
-    // Sync online/offline status to server so admin dashboard reflects reality
-    const uid = userRef.current?.id;
-    if (uid) {
-      authFetch(`/users/${uid}/active`, {
+    // Disponibilidade não altera a autorização da conta nem revoga sessões.
+    const currentUser = userRef.current;
+    if (currentUser?.id && currentUser.mode === "driver") {
+      authFetch(`/users/${currentUser.id}/availability`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active: online }),
+        body: JSON.stringify({ online }),
       }).catch(() => {});
     }
     if (online) {
@@ -360,6 +426,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       });
     } catch {}
   }, [user, setUser, authFetch]);
+
+  const changePassword = useCallback(async (
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const res = await authFetch("/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { ok: false, error: data.error ?? "Não foi possível alterar a senha." };
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false, error: "Sem conexão com o servidor." };
+    }
+  }, [authFetch]);
 
   const login = useCallback(async (phone: string, password: string): Promise<{ ok: boolean; error?: string }> => {
     try {
@@ -418,6 +504,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   }, [user?.id]);
 
+  // Restaura a disponibilidade se a preferência local carregar depois do socket.
+  useEffect(() => {
+    if (!user || user.mode !== "driver" || !token || !isDriverOnline) return;
+    if (!socketRef.current?.connected) return;
+
+    authFetch(`/users/${user.id}/availability`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ online: true }),
+    }).catch(() => {});
+  }, [user?.id, user?.mode, token, isDriverOnline, authFetch]);
+
   // Socket connection
   useEffect(() => {
     if (!user || !token) return;
@@ -439,6 +537,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const me = userRef.current;
       if (!me) return;
       try {
+        if (me.mode === "driver" && isDriverOnlineRef.current) {
+          await authFetch(`/users/${me.id}/availability`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ online: true }),
+          });
+        }
+
         const res = await authFetch(`/rides`);
         if (!res.ok) return;
         const all: Ride[] = await res.json();
@@ -452,13 +558,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             (r) => r.driverId === me.id &&
               (r.status === "accepted" || r.status === "in_progress")
           );
-          if (myActive.length > 0) {
-            setActiveRides((prev) => {
-              const existingIds = new Set(prev.map((r) => r.id));
-              const toAdd = myActive.filter((r) => !existingIds.has(r.id));
-              return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
-            });
-          }
+          setActiveRides(myActive);
         } else if (me.mode === "client") {
           // Server is the source of truth for the client's active ride.
           // This covers both reconnects and re-logins after logout.
@@ -530,6 +630,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // All drivers: remove from pending list regardless of who accepted
       if (me?.mode === "driver") {
         setPendingRides((prev) => prev.filter((r) => r.id !== ride.id));
+      }
+    });
+
+    socket.on("corrida_indisponivel", (rideId: string) => {
+      if (userRef.current?.mode === "driver") {
+        setPendingRides((prev) => prev.filter((r) => r.id !== rideId));
+      }
+    });
+
+    socket.on("corrida_iniciada", (ride: Ride) => {
+      const me = userRef.current;
+      if (me?.mode === "driver" && me.id === ride.driverId) {
+        setActiveRides((prev) => {
+          const exists = prev.some((r) => r.id === ride.id);
+          return exists ? prev.map((r) => r.id === ride.id ? ride : r) : [...prev, ride];
+        });
+      } else if (me?.id === ride.clientId) {
+        setActiveRide(ride);
+        scheduleLocalNotification("Corrida iniciada!", "Sua corrida está em andamento");
       }
     });
 
@@ -636,31 +755,58 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setPendingRides((prev) => prev.filter((r) => r.id !== rideId));
   }, []);
 
-  const finishRide = useCallback(async (rideId: string) => {
-    const res = await authFetch(`/finish-ride`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rideId }),
-    });
-    if (res.ok) {
+  const startRide = useCallback(async (rideId: string): Promise<boolean> => {
+    try {
+      const res = await authFetch(`/start-ride`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rideId }),
+      });
+      if (!res.ok) return false;
+      const ride: Ride = await res.json();
+      setActiveRides((prev) => prev.map((r) => r.id === rideId ? ride : r));
+      setActiveRide((prev) => prev?.id === rideId ? ride : prev);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [authFetch]);
+
+  const finishRide = useCallback(async (rideId: string): Promise<boolean> => {
+    try {
+      const res = await authFetch(`/finish-ride`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rideId }),
+      });
+      if (!res.ok) return false;
       const ride: Ride = await res.json();
       setActiveRide(null);
       setActiveRides((prev) => prev.filter((r) => r.id !== rideId));
       setFinishedRideToRate(ride);
       setMyRides((prev) => [ride, ...prev.filter((r) => r.id !== ride.id)]);
       setChatMessagesByRide((prev) => { const next = { ...prev }; delete next[rideId]; return next; });
+      return true;
+    } catch {
+      return false;
     }
   }, [authFetch]);
 
-  const cancelRide = useCallback(async (rideId: string) => {
-    await authFetch(`/cancel-ride`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rideId }),
-    });
-    setActiveRide(null);
-    setActiveRides((prev) => prev.filter((r) => r.id !== rideId));
-    setChatMessagesByRide((prev) => { const next = { ...prev }; delete next[rideId]; return next; });
+  const cancelRide = useCallback(async (rideId: string): Promise<boolean> => {
+    try {
+      const res = await authFetch(`/cancel-ride`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rideId }),
+      });
+      if (!res.ok) return false;
+      setActiveRide((prev) => prev?.id === rideId ? null : prev);
+      setActiveRides((prev) => prev.filter((r) => r.id !== rideId));
+      setChatMessagesByRide((prev) => { const next = { ...prev }; delete next[rideId]; return next; });
+      return true;
+    } catch {
+      return false;
+    }
   }, [authFetch]);
 
   const rateRide = useCallback(async (rideId: string, rating: number) => {
@@ -747,12 +893,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (res.ok) setPricing(await res.json());
   }, [authFetch]);
 
-  const setPricingRule = useCallback(async (destination: string, price: number, isLocal?: boolean) => {
-    await authFetch(`/pricing`, {
+  const setPricingRule = useCallback(async (
+    destination: string,
+    carPrice: number | null,
+    motorcyclePrice: number | null,
+    isLocal?: boolean,
+  ) => {
+    const res = await authFetch(`/pricing`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ destination, price, isLocal }),
+      body: JSON.stringify({ destination, carPrice, motorcyclePrice, isLocal }),
     });
+    if (!res.ok) throw new Error("Não foi possível salvar as tarifas.");
     await refreshPricing();
   }, [refreshPricing, authFetch]);
 
@@ -761,15 +913,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await refreshPricing();
   }, [refreshPricing, authFetch]);
 
-  const lookupPrice = useCallback(async (destination: string): Promise<{ price: number; isLocal: boolean } | null> => {
+  const lookupPrice = useCallback(async (
+    destination: string,
+    vehicleType: VehicleType,
+  ): Promise<{ price: number; isLocal: boolean } | null> => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
     try {
-      const res = await authFetch(`/pricing/lookup?destination=${encodeURIComponent(destination)}`);
-      if (res.ok) {
-        const d = await res.json();
-        if (d.price !== null && d.price !== undefined) return { price: d.price, isLocal: d.isLocal ?? false };
+      const query = new URLSearchParams({
+        destination,
+        vehicleType,
+      });
+      const res = await authFetch(`/pricing/lookup?${query.toString()}`, {
+        signal: controller.signal,
+      });
+      if (!res.ok) return null;
+
+      const data = await res.json();
+      if (typeof data.price === "number" && Number.isFinite(data.price) && data.price >= 0) {
+        return { price: data.price, isLocal: data.isLocal ?? false };
       }
-    } catch {}
-    return null;
+      return null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
   }, [authFetch]);
 
   const adminUpdateUser = useCallback(async (id: string, data: {
@@ -823,13 +992,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      user, setUser, updateProfile,
+      isSessionReady,
+      user, setUser, updateProfile, changePassword,
       isDriverOnline, setDriverOnline,
       activeRide, setActiveRide, activeRides,
       pendingRides, chatMessagesByRide, sendChatMessage,
       unreadChatCount, unreadByRide, markChatRead, fetchChatHistory,
       socket: socketRef.current,
-      requestRide, acceptRide, declineRide, finishRide, cancelRide, rateRide, cancelSoundAlerts,
+      requestRide, acceptRide, declineRide, startRide, finishRide, cancelRide, rateRide, cancelSoundAlerts,
       logout, allRides, allUsers, pricing,
       myRides, fetchMyRides,
       adminStats, refreshAdminData, refreshAdminStats, refreshPricing,

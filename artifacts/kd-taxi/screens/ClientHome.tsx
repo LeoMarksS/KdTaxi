@@ -101,22 +101,66 @@ export default function ClientHome() {
   const pulseStyle = useAnimatedStyle(() => ({ transform: [{ scale: pulseScale.value }] }));
 
   useEffect(() => {
-    if (!destination.trim() || destination.trim().length < 3) { setPriceResult(null); return; }
-    const timer = setTimeout(async () => {
-      setPriceLookingUp(true);
-      const p = await lookupPrice(destination.trim());
-      setPriceResult(p);
+    const normalizedDestination = destination.trim();
+    let cancelled = false;
+
+    if (normalizedDestination.length < 3) {
+      setPriceResult(null);
       setPriceLookingUp(false);
+      return;
+    }
+
+    setPriceResult(null);
+    setPriceLookingUp(true);
+
+    const timer = setTimeout(async () => {
+      try {
+        const result = await lookupPrice(normalizedDestination, vehicleType);
+        if (!cancelled) setPriceResult(result);
+      } catch {
+        if (!cancelled) setPriceResult(null);
+      } finally {
+        if (!cancelled) setPriceLookingUp(false);
+      }
     }, 600);
-    return () => clearTimeout(timer);
-  }, [destination]);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [destination, vehicleType, lookupPrice]);
 
   const handleRequest = async () => {
     if (!origin.trim() || !destination.trim()) return;
+
+    if (priceLookingUp) {
+      Alert.alert("Aguarde", "Estamos consultando a tarifa do veículo selecionado.");
+      return;
+    }
+
+    if (!priceResult) {
+      Alert.alert(
+        "Tarifa indisponível",
+        `Não há tarifa cadastrada para ${vehicleType === "motorcycle" ? "motocicleta" : "carro"} neste destino. Escolha outro destino ou aguarde o cadastro da tarifa.`,
+      );
+      return;
+    }
+
     setLoading(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    await requestRide(origin.trim(), destination.trim(), payment, vehicleType);
-    setLoading(false);
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      const ride = await requestRide(origin.trim(), destination.trim(), payment, vehicleType);
+      if (!ride) {
+        Alert.alert(
+          "Não foi possível solicitar",
+          "A tarifa pode ter sido alterada ou a conexão falhou. Consulte novamente antes de tentar.",
+        );
+      }
+    } catch {
+      Alert.alert("Erro", "Não foi possível solicitar a corrida. Tente novamente.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCancel = async () => {
@@ -398,7 +442,7 @@ export default function ClientHome() {
                   />
                 </View>
 
-                {(priceResult !== null || priceLookingUp) && (
+                {(priceResult !== null || priceLookingUp || destination.trim().length >= 3) && (
                   <View style={s.priceRow}>
                     <View>
                       <Text style={s.priceLabel}>
@@ -412,9 +456,13 @@ export default function ClientHome() {
                     </View>
                     {priceLookingUp ? (
                       <ActivityIndicator size="small" color={colors.primary} />
+                    ) : priceResult ? (
+                      <Text style={[s.priceValue, { color: priceResult.isLocal ? colors.primary : colors.statusAccepted }]}>
+                        R$ {priceResult.price.toFixed(2).replace(".", ",")}
+                      </Text>
                     ) : (
-                      <Text style={[s.priceValue, { color: priceResult?.isLocal ? colors.primary : colors.statusAccepted }]}>
-                        R$ {priceResult!.price.toFixed(2).replace(".", ",")}
+                      <Text style={[s.priceLabel, { color: colors.statusWaiting }]}>
+                        Tarifa não cadastrada para este veículo
                       </Text>
                     )}
                   </View>
@@ -487,9 +535,9 @@ export default function ClientHome() {
                 </View>
 
                 <TouchableOpacity
-                  style={[s.confirmBtn, { backgroundColor: vehicleAccent, opacity: !origin.trim() || !destination.trim() ? 0.5 : 1 }]}
+                  style={[s.confirmBtn, { backgroundColor: vehicleAccent, opacity: !origin.trim() || !destination.trim() || !priceResult || priceLookingUp ? 0.5 : 1 }]}
                   onPress={handleRequest}
-                  disabled={loading || !origin.trim() || !destination.trim()}
+                  disabled={loading || !origin.trim() || !destination.trim() || !priceResult || priceLookingUp}
                 >
                   {loading ? (
                     <ActivityIndicator color="#000" size="small" />

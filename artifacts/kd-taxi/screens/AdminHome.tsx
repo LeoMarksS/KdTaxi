@@ -35,13 +35,16 @@ function StatCard({ label, value, sub, color }: { label: string; value: string |
 
 function EditUserModal({ user, onSave, onDelete, onClose }: {
   user: User;
-  onSave: (id: string, data: { name: string; phone: string }) => Promise<void>;
+  onSave: (id: string, data: { name: string; phone: string; active: boolean; password?: string }) => Promise<boolean>;
   onDelete: (id: string) => Promise<void>;
   onClose: () => void;
 }) {
   const colors = useColors();
   const [name, setName] = useState(user.name);
   const [phone, setPhone] = useState(user.phone);
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [active, setActive] = useState(user.active !== false);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -53,7 +56,7 @@ function EditUserModal({ user, onSave, onDelete, onClose }: {
     },
     card: {
       backgroundColor: colors.background, borderRadius: 20, padding: 24,
-      width: "100%", maxWidth: 400, borderWidth: 1, borderColor: colors.border,
+      width: "100%", maxWidth: 400, maxHeight: "90%", borderWidth: 1, borderColor: colors.border,
     },
     title: { fontSize: 18, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold", marginBottom: 18 },
     label: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_500Medium", marginBottom: 6, textTransform: "uppercase" },
@@ -93,21 +96,135 @@ function EditUserModal({ user, onSave, onDelete, onClose }: {
           </View>
         </View>
 
+        <View style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: 12,
+          marginBottom: 16,
+          borderRadius: 12,
+          backgroundColor: colors.card,
+          borderWidth: 1,
+          borderColor: colors.border,
+        }}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.label}>Situação da conta</Text>
+            <Text style={{
+              color: active ? "#2EAD62" : colors.destructive,
+              fontWeight: "700",
+              fontSize: 14,
+            }}>
+              {active ? "Conta ativa" : "Conta desativada"}
+            </Text>
+          </View>
+          <TouchableOpacity
+            disabled={saving}
+            style={{
+              paddingHorizontal: 14,
+              paddingVertical: 10,
+              borderRadius: 10,
+              backgroundColor: active ? colors.destructive + "22" : "#2EAD62" + "22",
+              borderWidth: 1,
+              borderColor: active ? colors.destructive : "#2EAD62",
+            }}
+            onPress={() => {
+              if (!active) {
+                setActive(true);
+                return;
+              }
+
+              if (Platform.OS === "web") {
+                if (window.confirm("Deseja realmente desativar esta conta? O usuário perderá o acesso até ser reativado.")) {
+                  setActive(false);
+                }
+              } else {
+                Alert.alert(
+                  "Desativar conta",
+                  "O usuário perderá o acesso ao aplicativo até que a conta seja reativada. Deseja continuar?",
+                  [
+                    { text: "Cancelar", style: "cancel" },
+                    { text: "Desativar", style: "destructive", onPress: () => setActive(false) },
+                  ]
+                );
+              }
+            }}
+          >
+            <Text style={{
+              color: active ? colors.destructive : "#2EAD62",
+              fontWeight: "700",
+              fontSize: 13,
+            }}>
+              {active ? "Desativar" : "Ativar"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         <Text style={s.label}>Nome</Text>
         <TextInput style={s.input} value={name} onChangeText={setName} placeholderTextColor={colors.mutedForeground} />
 
         <Text style={s.label}>Telefone</Text>
         <TextInput style={s.input} value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholderTextColor={colors.mutedForeground} />
 
+        <Text style={s.label}>Nova senha (opcional)</Text>
+        <TextInput
+          style={s.input}
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+          autoCapitalize="none"
+          maxLength={128}
+          placeholder="Deixe vazio para não alterar"
+          placeholderTextColor={colors.mutedForeground}
+        />
+
+        <Text style={s.label}>Confirmar nova senha</Text>
+        <TextInput
+          style={s.input}
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          secureTextEntry
+          autoCapitalize="none"
+          maxLength={128}
+          placeholder="Repita a nova senha"
+          placeholderTextColor={colors.mutedForeground}
+        />
+
         <View style={s.row}>
           <TouchableOpacity style={s.cancelBtn} onPress={onClose}>
             <Text style={s.cancelBtnText}>Cancelar</Text>
           </TouchableOpacity>
           <TouchableOpacity style={s.saveBtn} disabled={saving} onPress={async () => {
+            if (password.length > 0 && (password.length < 12 || password.length > 128)) {
+              Alert.alert("Senha inválida", "A nova senha deve ter entre 12 e 128 caracteres.");
+              return;
+            }
+            if (password.length > 0 && password !== confirmPassword) {
+              Alert.alert("Atenção", "A confirmação da senha não corresponde.");
+              return;
+            }
+            if (password.length === 0 && confirmPassword.length > 0) {
+              Alert.alert("Atenção", "Informe a nova senha ou deixe os dois campos vazios.");
+              return;
+            }
+
             setSaving(true);
-            await onSave(user.id, { name: name.trim(), phone: phone.trim() });
-            setSaving(false);
-            onClose();
+            try {
+              const data: { name: string; phone: string; active: boolean; password?: string } = {
+                name: name.trim(),
+                phone: phone.trim(),
+                active,
+              };
+              if (password.length > 0) data.password = password;
+
+              const ok = await onSave(user.id, data);
+              if (ok) {
+                onClose();
+              } else {
+                Alert.alert("Não foi possível salvar", "Verifique os dados e tente novamente.");
+              }
+            } finally {
+              setSaving(false);
+            }
           }}>
             {saving ? <ActivityIndicator color="#000" size="small" /> : (
               <>
@@ -156,10 +273,12 @@ export default function AdminHome() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [loading, setLoading] = useState(true);
   const [newCity, setNewCity] = useState("");
-  const [newPrice, setNewPrice] = useState("");
+  const [newCarPrice, setNewCarPrice] = useState("");
+  const [newMotorcyclePrice, setNewMotorcyclePrice] = useState("");
   const [savingPrice, setSavingPrice] = useState(false);
   const [localCityName, setLocalCityName] = useState("");
-  const [localPriceValue, setLocalPriceValue] = useState("");
+  const [localCarPrice, setLocalCarPrice] = useState("");
+  const [localMotorcyclePrice, setLocalMotorcyclePrice] = useState("");
   const [savingLocalPrice, setSavingLocalPrice] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -181,7 +300,8 @@ export default function AdminHome() {
     const localRule = pricing.find((p) => p.isLocal);
     if (localRule) {
       setLocalCityName(localRule.destination);
-      setLocalPriceValue(localRule.price.toFixed(2));
+      setLocalCarPrice(localRule.carPrice == null ? "" : localRule.carPrice.toFixed(2));
+      setLocalMotorcyclePrice(localRule.motorcyclePrice == null ? "" : localRule.motorcyclePrice.toFixed(2));
     }
   }, [pricing]);
 
@@ -194,23 +314,50 @@ export default function AdminHome() {
     in_progress: "Em andamento", finished: "Finalizada", cancelled: "Cancelada",
   };
 
+  const parseOptionalPrice = (value: string): number | null => {
+    if (!value.trim()) return null;
+    const parsed = Number(value.replace(",", "."));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  };
+
   const handleAddPrice = async () => {
-    if (!newCity.trim() || !newPrice.trim()) return;
-    const price = parseFloat(newPrice.replace(",", "."));
-    if (isNaN(price) || price <= 0) return;
+    if (!newCity.trim()) return;
+    const carPrice = parseOptionalPrice(newCarPrice);
+    const motorcyclePrice = parseOptionalPrice(newMotorcyclePrice);
+    if (carPrice === null && motorcyclePrice === null) {
+      Alert.alert("Tarifa necessária", "Informe o preço do carro, da motocicleta ou de ambos.");
+      return;
+    }
     setSavingPrice(true);
-    await setPricingRule(newCity.trim(), price);
-    setNewCity(""); setNewPrice("");
-    setSavingPrice(false);
+    try {
+      await setPricingRule(newCity.trim(), carPrice, motorcyclePrice, false);
+      setNewCity("");
+      setNewCarPrice("");
+      setNewMotorcyclePrice("");
+    } catch {
+      Alert.alert("Erro", "Não foi possível salvar as tarifas deste destino.");
+    } finally {
+      setSavingPrice(false);
+    }
   };
 
   const handleSaveLocalPrice = async () => {
-    if (!localCityName.trim() || !localPriceValue.trim()) return;
-    const price = parseFloat(localPriceValue.replace(",", "."));
-    if (isNaN(price) || price <= 0) return;
+    if (!localCityName.trim()) return;
+    const carPrice = parseOptionalPrice(localCarPrice);
+    const motorcyclePrice = parseOptionalPrice(localMotorcyclePrice);
+    if (carPrice === null && motorcyclePrice === null) {
+      Alert.alert("Tarifa necessária", "Informe o preço do carro, da motocicleta ou de ambos.");
+      return;
+    }
     setSavingLocalPrice(true);
-    await setPricingRule(localCityName.trim(), price, true);
-    setSavingLocalPrice(false);
+    try {
+      await setPricingRule(localCityName.trim(), carPrice, motorcyclePrice, true);
+      Alert.alert("Sucesso", "Tarifas locais salvas.");
+    } catch {
+      Alert.alert("Erro", "Não foi possível salvar as tarifas locais.");
+    } finally {
+      setSavingLocalPrice(false);
+    }
   };
 
   const handleDeleteLocalPrice = async () => {
@@ -218,7 +365,8 @@ export default function AdminHome() {
     if (!localRule) return;
     await deletePricingRule(localRule.id);
     setLocalCityName("");
-    setLocalPriceValue("");
+    setLocalCarPrice("");
+    setLocalMotorcyclePrice("");
   };
 
   const handleClearRides = async () => {
@@ -385,7 +533,7 @@ export default function AdminHome() {
   ];
 
   const renderUserCard = (item: User) => {
-    const isOnline = item.mode === "driver" && (item as any).active === true;
+    const isOnline = item.mode === "driver" && (item as any).isOnline === true;
     return (
       <View style={s.userCard} key={item.id}>
         <View style={{ position: "relative" }}>
@@ -436,7 +584,7 @@ export default function AdminHome() {
       {editingUser && (
         <EditUserModal
           user={editingUser}
-          onSave={async (id, data) => { await adminUpdateUser(id, data); }}
+          onSave={(id, data) => adminUpdateUser(id, data)}
           onDelete={async (id) => { await adminDeleteUser(id); }}
           onClose={() => setEditingUser(null)}
         />
@@ -586,22 +734,29 @@ export default function AdminHome() {
                     </Text>
                   </View>
                 </View>
-                <View style={s.inputRow}>
+                <View style={{ marginBottom: 12 }}>
                   <TextInput
                     style={s.input} value={localCityName} onChangeText={setLocalCityName}
                     placeholder="Nome da cidade local" placeholderTextColor={colors.mutedForeground}
                   />
-                  <TextInput
-                    style={s.priceInput} value={localPriceValue} onChangeText={setLocalPriceValue}
-                    placeholder="R$" placeholderTextColor={colors.mutedForeground}
-                    keyboardType="decimal-pad"
-                  />
+                  <View style={[s.inputRow, { marginTop: 10, marginBottom: 0 }]}>
+                    <TextInput
+                      style={s.priceInput} value={localCarPrice} onChangeText={setLocalCarPrice}
+                      placeholder="Carro (R$)" placeholderTextColor={colors.mutedForeground}
+                      keyboardType="decimal-pad"
+                    />
+                    <TextInput
+                      style={s.priceInput} value={localMotorcyclePrice} onChangeText={setLocalMotorcyclePrice}
+                      placeholder="Moto (R$)" placeholderTextColor={colors.mutedForeground}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
                 </View>
                 <View style={{ flexDirection: "row", gap: 10 }}>
                   <TouchableOpacity
-                    style={[s.addBtn, { flex: 2, backgroundColor: colors.primary, opacity: !localCityName.trim() || !localPriceValue.trim() ? 0.5 : 1 }]}
+                    style={[s.addBtn, { flex: 2, backgroundColor: colors.primary, opacity: !localCityName.trim() || (!localCarPrice.trim() && !localMotorcyclePrice.trim()) ? 0.5 : 1 }]}
                     onPress={handleSaveLocalPrice}
-                    disabled={savingLocalPrice || !localCityName.trim() || !localPriceValue.trim()}
+                    disabled={savingLocalPrice || !localCityName.trim() || (!localCarPrice.trim() && !localMotorcyclePrice.trim())}
                   >
                     {savingLocalPrice ? (
                       <ActivityIndicator color="#000" size="small" />
@@ -629,21 +784,28 @@ export default function AdminHome() {
                 <Text style={s.pricingHint}>
                   O preço é exibido automaticamente ao cliente quando o destino digitado coincidir com o nome cadastrado.
                 </Text>
-                <View style={s.inputRow}>
+                <View style={{ marginBottom: 12 }}>
                   <TextInput
                     style={s.input} value={newCity} onChangeText={setNewCity}
                     placeholder="Nome da cidade/destino" placeholderTextColor={colors.mutedForeground}
                   />
-                  <TextInput
-                    style={s.priceInput} value={newPrice} onChangeText={setNewPrice}
-                    placeholder="R$" placeholderTextColor={colors.mutedForeground}
-                    keyboardType="decimal-pad"
-                  />
+                  <View style={[s.inputRow, { marginTop: 10, marginBottom: 0 }]}>
+                    <TextInput
+                      style={s.priceInput} value={newCarPrice} onChangeText={setNewCarPrice}
+                      placeholder="Carro (R$)" placeholderTextColor={colors.mutedForeground}
+                      keyboardType="decimal-pad"
+                    />
+                    <TextInput
+                      style={s.priceInput} value={newMotorcyclePrice} onChangeText={setNewMotorcyclePrice}
+                      placeholder="Moto (R$)" placeholderTextColor={colors.mutedForeground}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
                 </View>
                 <TouchableOpacity
-                  style={[s.addBtn, { opacity: !newCity.trim() || !newPrice.trim() ? 0.5 : 1 }]}
+                  style={[s.addBtn, { opacity: !newCity.trim() || (!newCarPrice.trim() && !newMotorcyclePrice.trim()) ? 0.5 : 1 }]}
                   onPress={handleAddPrice}
-                  disabled={savingPrice || !newCity.trim() || !newPrice.trim()}
+                  disabled={savingPrice || !newCity.trim() || (!newCarPrice.trim() && !newMotorcyclePrice.trim())}
                 >
                   {savingPrice ? (
                     <ActivityIndicator color="#000" size="small" />
@@ -683,7 +845,14 @@ export default function AdminHome() {
                 </View>
               ) : (
                 <>
-                  <Text style={s.priceValue}>R$ {item.price.toFixed(2).replace(".", ",")}</Text>
+                  <View style={{ alignItems: "flex-end", marginRight: 12 }}>
+                    <Text style={s.priceValue}>
+                      Carro: {item.carPrice == null ? "não cadastrado" : `R$ ${item.carPrice.toFixed(2).replace(".", ",")}`}
+                    </Text>
+                    <Text style={s.priceValue}>
+                      Moto: {item.motorcyclePrice == null ? "não cadastrada" : `R$ ${item.motorcyclePrice.toFixed(2).replace(".", ",")}`}
+                    </Text>
+                  </View>
                   <TouchableOpacity style={s.deleteBtn} onPress={() => setPendingDeleteId(item.id)}>
                     <Feather name="trash-2" size={16} color={colors.destructive} />
                   </TouchableOpacity>
@@ -765,7 +934,7 @@ export default function AdminHome() {
           ListHeaderComponent={
             passengers.length > 0 ? (
               <Text style={s.sectionHeader}>{passengers.length} passageiro{passengers.length !== 1 ? "s" : ""} cadastrado{passengers.length !== 1 ? "s" : ""}</Text>
-            ) : null
+            ) : undefined
           }
           renderItem={({ item }) => renderUserCard(item)}
           ListEmptyComponent={
@@ -784,7 +953,7 @@ export default function AdminHome() {
           ListHeaderComponent={
             drivers.length > 0 ? (
               <Text style={s.sectionHeader}>{drivers.length} motorista{drivers.length !== 1 ? "s" : ""} cadastrado{drivers.length !== 1 ? "s" : ""}</Text>
-            ) : null
+            ) : undefined
           }
           renderItem={({ item }) => renderUserCard(item)}
           ListEmptyComponent={

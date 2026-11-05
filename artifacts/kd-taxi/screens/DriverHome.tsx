@@ -163,13 +163,14 @@ export default function DriverHome() {
   const insets = useSafeAreaInsets();
   const {
     user, isDriverOnline, setDriverOnline, activeRides, pendingRides,
-    acceptRide, declineRide, finishRide, logout, unreadByRide,
+    acceptRide, declineRide, startRide, finishRide, logout, unreadByRide,
     myRides, fetchMyRides, cancelSoundAlerts,
   } = useApp();
 
   const [declinedIds, setDeclinedIds] = useState<Set<string>>(new Set());
   // confirmingFinish is keyed by rideId — null means no confirmation in progress
   const [confirmingFinishId, setConfirmingFinishId] = useState<string | null>(null);
+  const [confirmingStartId, setConfirmingStartId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showAmount, setShowAmount] = useState(true);
 
@@ -208,11 +209,26 @@ export default function DriverHome() {
     setDeclinedIds((prev) => new Set([...prev, rideId]));
   };
 
+  const handleStart = async (rideId: string) => {
+    if (confirmingStartId !== rideId) { setConfirmingStartId(rideId); return; }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const ok = await startRide(rideId);
+    if (ok) {
+      setConfirmingStartId(null);
+    } else {
+      Alert.alert("Não foi possível iniciar", "Verifique sua conexão e tente novamente.");
+    }
+  };
+
   const handleFinish = async (rideId: string) => {
     if (confirmingFinishId !== rideId) { setConfirmingFinishId(rideId); return; }
-    setConfirmingFinishId(null);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    await finishRide(rideId);
+    const ok = await finishRide(rideId);
+    if (ok) {
+      setConfirmingFinishId(null);
+    } else {
+      Alert.alert("Não foi possível finalizar", "Verifique sua conexão e tente novamente.");
+    }
   };
 
   const visiblePending = pendingRides.filter((r) => !declinedIds.has(r.id));
@@ -368,11 +384,14 @@ export default function DriverHome() {
           {activeRides.map((ride) => {
             const rideUnread = unreadByRide[ride.id] ?? 0;
             const confirming = confirmingFinishId === ride.id;
+            const confirmingStart = confirmingStartId === ride.id;
             return (
               <View key={ride.id} style={s.activeCard}>
                 <View style={s.activeBadge}>
                   <Feather name="navigation" size={16} color={colors.statusInProgress} />
-                  <Text style={s.activeBadgeText}>Em andamento</Text>
+                  <Text style={s.activeBadgeText}>
+                    {ride.status === "accepted" ? "Aguardando início" : "Em andamento"}
+                  </Text>
                 </View>
                 <View style={s.clientRow}>
                   <UserAvatar name={ride.clientName} photo={ride.clientPhoto} size={50} mode="client" />
@@ -445,7 +464,24 @@ export default function DriverHome() {
                       </View>
                     )}
                   </View>
-                  {confirming ? (
+                  {ride.status === "accepted" ? (
+                    confirmingStart ? (
+                      <>
+                        <TouchableOpacity style={s.finishBtnConfirm} onPress={() => handleStart(ride.id)}>
+                          <Feather name="play" size={18} color="#fff" />
+                          <Text style={s.finishText}>Confirmar início</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={s.cancelConfirmBtn} onPress={() => setConfirmingStartId(null)}>
+                          <Text style={s.cancelConfirmText}>Voltar</Text>
+                        </TouchableOpacity>
+                      </>
+                    ) : (
+                      <TouchableOpacity style={s.finishBtn} onPress={() => handleStart(ride.id)}>
+                        <Feather name="play" size={18} color="#fff" />
+                        <Text style={s.finishText}>Iniciar</Text>
+                      </TouchableOpacity>
+                    )
+                  ) : confirming ? (
                     <>
                       <TouchableOpacity style={s.finishBtnConfirm} onPress={() => handleFinish(ride.id)}>
                         <Feather name="flag" size={18} color="#fff" />
@@ -647,7 +683,7 @@ export default function DriverHome() {
               <MaterialCommunityIcons name="clock-outline" size={48} color={colors.mutedForeground} />
               <Text style={s.emptyText}>Aguardando corridas...</Text>
             </View>
-          ) : null
+          ) : undefined
         }
       />
     </View>
