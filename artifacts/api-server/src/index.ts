@@ -9,6 +9,10 @@ import {
   getRideParticipants,
   isRideParticipant,
   recordChatMessage,
+  registerDriverSocket,
+  unregisterDriverSocket,
+  isUserForeground,
+  sendChatPushNotification,
   type ChatMessage,
 } from "./routes/taxi";
 
@@ -79,7 +83,15 @@ io.on("connection", (socket) => {
   socket.join(`role:${user.mode}`);
   if (user.mode === "driver") {
     socket.join(`driver-vehicle:${user.vehicleType === "motorcycle" ? "motorcycle" : "car"}`);
+    registerDriverSocket(user.id, socket.id);
   }
+
+  socket.data.appState = "active";
+  socket.on("app_state", (state: unknown) => {
+    if (state === "active" || state === "background" || state === "inactive") {
+      socket.data.appState = state;
+    }
+  });
 
   socket.on("mensagem_chat", async (msg: Partial<ChatMessage>) => {
     const rideId = msg?.rideId;
@@ -108,9 +120,15 @@ io.on("connection", (socket) => {
     const { clientId, driverId } = getRideParticipants(rideId);
     if (clientId) io.to(`user:${clientId}`).emit("mensagem_chat", fullMsg);
     if (driverId) io.to(`user:${driverId}`).emit("mensagem_chat", fullMsg);
+
+    const recipientId = user.id === clientId ? driverId : clientId;
+    if (recipientId && !(await isUserForeground(recipientId))) {
+      sendChatPushNotification(recipientId, fullMsg.senderName, rideId);
+    }
   });
 
   socket.on("disconnect", () => {
+    if (user.mode === "driver") unregisterDriverSocket(user.id, socket.id);
     logger.info({ socketId: socket.id, userId: user.id }, "Socket disconnected");
   });
 });
