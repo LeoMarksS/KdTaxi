@@ -11,6 +11,25 @@ const router = Router();
 
 let socketServer: SocketIOServer | undefined;
 
+// Disponibilidade segue explicitamente o botão Online do motorista,
+// inclusive quando o Android suspende a conexão do aplicativo.
+const driverAvailability = new Set<string>();
+
+export function setDriverAvailability(userId: string, online: boolean): void {
+  if (online) driverAvailability.add(userId);
+  else driverAvailability.delete(userId);
+}
+
+export function isDriverOnline(userId: string): boolean {
+  return driverAvailability.has(userId);
+}
+
+export async function isUserForeground(userId: string): Promise<boolean> {
+  if (!socketServer) return false;
+  const sockets = await socketServer.in(`user:${userId}`).fetchSockets();
+  return sockets.some((socket) => socket.data.appState === "active");
+}
+
 export function setSocketServer(server: SocketIOServer): void {
   socketServer = server;
 }
@@ -390,6 +409,7 @@ async function sendPushNotification(
   title: string,
   body: string,
   data?: object,
+  options?: { channelId?: string; sound?: string },
 ) {
   try {
     const response = await fetch("https://exp.host/--/api/v2/push/send", {
@@ -400,8 +420,8 @@ async function sendPushNotification(
         to: token,
         title,
         body,
-        sound: "default",
-        channelId: "ride_alerts_v1",
+        sound: options?.sound ?? "default",
+        channelId: options?.channelId ?? "ride_alerts_v1",
         priority: "high",
         data: data ?? {},
       }),
@@ -445,6 +465,18 @@ async function sendPushNotification(
   }
 }
 
+export function sendChatPushNotification(userId: string, senderName: string, rideId: string): void {
+  const recipient = users.get(userId);
+  if (!recipient?.active || !recipient.pushToken) return;
+  void sendPushNotification(
+    recipient.pushToken,
+    "Nova mensagem no KD TAXI",
+    `Mensagem de ${senderName} no chat da sua corrida.`,
+    { type: "chat_message", rideId },
+    { channelId: "ride_alerts_v1", sound: "default" },
+  );
+}
+
 async function lookupPrice(
   destination: string,
   vehicleType: "car" | "motorcycle",
@@ -480,12 +512,12 @@ async function lookupPrice(
 
 function safeUser(u: User) {
   const { passwordHash: _ph, ...rest } = u;
-  return rest;
+  return { ...rest, isOnline: u.mode === "driver" && isDriverOnline(u.id) };
 }
 
 function safeUserList(u: User) {
   const { passwordHash: _ph, pushToken: _pushToken, ...rest } = u;
-  return rest;
+  return { ...rest, isOnline: u.mode === "driver" && isDriverOnline(u.id) };
 }
 
 // POST /register – create a new client or driver account
@@ -749,6 +781,32 @@ router.get("/users/:id", requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+// POST /users/:id/availability – disponibilidade do motorista, separada da conta ativa.
+router.post("/users/:id/availability", requireAuth, async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  if (req.authUser!.id !== id) {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+
+  const user = users.get(id);
+  if (!user) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  if (user.mode !== "driver") {
+    res.status(400).json({ error: "Somente motoristas podem alterar a disponibilidade" });
+    return;
+  }
+  if (!user.active) {
+    res.status(403).json({ error: "Esta conta está desativada" });
+    return;
+  }
+
+  setDriverAvailability(id, req.body.online === true);
+  res.json({ isOnline: isDriverOnline(id) });
+});
+
 // POST /users/:id/active – self only
 router.post("/users/:id/active", requireAuth, async (req: Request, res: Response) => {
   const id = req.params.id as string;
@@ -971,9 +1029,9 @@ router.get("/admin/stats", requireAdmin, async (_req: Request, res: Response) =>
       totalUsers: allUserList.filter((u) => u.mode !== "admin").length,
       totalClients: allUserList.filter((u) => u.mode === "client").length,
       totalDrivers: allUserList.filter((u) => u.mode === "driver").length,
-      onlineDrivers: allUserList.filter((u) => u.mode === "driver" && u.active).length,
-      onlineCarDrivers: allUserList.filter((u) => u.mode === "driver" && u.active && driverVehicleType(u) === "car").length,
-      onlineMotorcycleDrivers: allUserList.filter((u) => u.mode === "driver" && u.active && driverVehicleType(u) === "motorcycle").length,
+      onlineDrivers: allUserList.filter((u) => u.mode === "driver" && isDriverOnline(u.id)).length,
+      onlineCarDrivers: allUserList.filter((u) => u.mode === "driver" && isDriverOnline(u.id) && driverVehicleType(u) === "car").length,
+      onlineMotorcycleDrivers: allUserList.filter((u) => u.mode === "driver" && isDriverOnline(u.id) && driverVehicleType(u) === "motorcycle").length,
       totalRides: allRideList.length,
       finishedRides: finishedRides.length,
       cancelledRides: allRideList.filter((r) => r.status === "cancelled").length,
@@ -1174,12 +1232,17 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
   if (io) io.to(`driver-vehicle:${ride.vehicleType}`).emit("nova_corrida", ride);
 
   for (const u of users.values()) {
-    if (u.mode === "driver" && u.active && u.pushToken && driverCanTakeRide(u, ride)) {
+    if (u.mode === "driver" && u.active && u.pushToken &&
+      isDriverOnline(u.id) && driverCanTakeRide(u, ride)) {
+      // Em primeiro plano, o Socket.IO já toca o alerta local do aplicativo.
+      // Em segundo plano, enviamos o push com o canal de som personalizado.
+      if (await isUserForeground(u.id)) continue;
       sendPushNotification(
         u.pushToken,
         "Nova corrida!",
         `${ride.clientName}: ${origin} → ${destination} · ${ride.vehicleType === "motorcycle" ? "KD MOTO" : "KD CARRO"}`,
-        { rideId: ride.id },
+        { type: "new_ride", rideId: ride.id },
+        { channelId: "ride_alerts_v2", sound: "ride_alert.wav" },
       );
     }
   }
