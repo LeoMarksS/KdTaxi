@@ -9,7 +9,16 @@
 export interface PriceRule {
   id: string;
   destination: string;
-  price: number;
+  /**
+   * @minimum 0
+   * @nullable
+   */
+  carPrice: number | null;
+  /**
+   * @minimum 0
+   * @nullable
+   */
+  motorcyclePrice: number | null;
   isLocal?: boolean;
   createdAt: Date;
 }

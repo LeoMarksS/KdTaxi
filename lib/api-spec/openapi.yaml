@@ -420,26 +420,33 @@ components:
           type: string
         destination:
           type: string
-        price:
-          type: number
+        carPrice:
+          type: [number, "null"]
+          minimum: 0
+        motorcyclePrice:
+          type: [number, "null"]
+          minimum: 0
         isLocal:
           type: boolean
         createdAt:
           type: string
           format: date-time
-      required: [id, destination, price, createdAt]
+      required: [id, destination, carPrice, motorcyclePrice, createdAt]
     PricingInput:
       type: object
       properties:
         destination:
           type: string
           minLength: 1
-        price:
-          type: number
+        carPrice:
+          type: [number, "null"]
+          minimum: 0
+        motorcyclePrice:
+          type: [number, "null"]
           minimum: 0
         isLocal:
           type: boolean
-      required: [destination, price]
+      required: [destination, carPrice, motorcyclePrice]
     Ride:
       type: object
       properties:

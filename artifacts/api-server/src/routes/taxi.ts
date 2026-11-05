@@ -67,7 +67,8 @@ function driverCanTakeRide(user: User, ride: Ride): boolean {
 interface PriceRule {
   id: string;
   destination: string;
-  price: number;
+  carPrice: number | null;
+  motorcyclePrice: number | null;
   isLocal?: boolean;
   createdAt: string;
 }
@@ -209,7 +210,8 @@ export async function initializeAuthStore(): Promise<void> {
     pricing.set(record.id, {
       id: record.id,
       destination: record.destination,
-      price: record.price,
+      carPrice: record.carPrice,
+      motorcyclePrice: record.motorcyclePrice,
       isLocal: record.isLocal,
       createdAt: record.createdAt.toISOString(),
     });
@@ -393,20 +395,37 @@ async function sendPushNotification(token: string, title: string, body: string, 
   } catch (_) {}
 }
 
-function lookupPrice(destination: string): { price: number; isLocal: boolean } | undefined {
+async function lookupPrice(
+  destination: string,
+  vehicleType: "car" | "motorcycle",
+): Promise<{ price: number; isLocal: boolean } | undefined> {
   const dest = destination.toLowerCase().trim();
-  // First try to match specific (non-local) pricing rules
-  for (const rule of pricing.values()) {
+  if (!dest) return undefined;
+
+  const currentRules = await db.select().from(dbPricingRules).orderBy(asc(dbPricingRules.destination));
+  const vehiclePrice = (rule: typeof dbPricingRules.$inferSelect) =>
+    vehicleType === "motorcycle" ? rule.motorcyclePrice : rule.carPrice;
+
+  for (const rule of currentRules) {
     if (rule.isLocal) continue;
-    if (dest.includes(rule.destination.toLowerCase().trim()) ||
-        rule.destination.toLowerCase().trim().includes(dest)) {
-      return { price: rule.price, isLocal: false };
+
+    const ruleDestination = rule.destination.toLowerCase().trim();
+
+    if (dest.includes(ruleDestination) || ruleDestination.includes(dest)) {
+      const price = vehiclePrice(rule);
+      return typeof price === "number" && Number.isFinite(price)
+        ? { price, isLocal: false }
+        : undefined;
     }
   }
-  // Fallback: use local/intra-city price if configured
-  const localRule = Array.from(pricing.values()).find((r) => r.isLocal);
-  if (localRule) return { price: localRule.price, isLocal: true };
-  return undefined;
+
+  const localRule = currentRules.find((rule) => rule.isLocal);
+  if (!localRule) return undefined;
+
+  const price = vehiclePrice(localRule);
+  return typeof price === "number" && Number.isFinite(price)
+    ? { price, isLocal: true }
+    : undefined;
 }
 
 function safeUser(u: User) {
@@ -1036,8 +1055,21 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
     return;
   }
 
-  const priceResult = lookupPrice(destination);
-  const price = priceResult?.price;
+  const selectedVehicle: "car" | "motorcycle" =
+    vehicleType === "motorcycle" ? "motorcycle" : "car";
+
+  const priceResult = await lookupPrice(destination, selectedVehicle);
+
+  if (!priceResult) {
+    const vehicleName = selectedVehicle === "motorcycle" ? "moto" : "carro";
+    res.status(409).json({
+      error: `Não há tarifa cadastrada para ${vehicleName} neste destino.`,
+      code: "FARE_NOT_CONFIGURED",
+    });
+    return;
+  }
+
+  const price = priceResult.price;
   const client = req.authUser!;
   const ride: Ride = {
     id: getId(),
@@ -1049,7 +1081,7 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
     clientRideCount: client.rideCount,
     origin,
     destination,
-    vehicleType: vehicleType === "motorcycle" ? "motorcycle" : "car",
+    vehicleType: selectedVehicle,
     price,
     payment: (payment as Ride["payment"]) ?? "dinheiro",
     status: "waiting",
@@ -1559,7 +1591,8 @@ router.get("/pricing", requireAuth, async (_req: Request, res: Response) => {
     const rules: PriceRule[] = records.map((record) => ({
       id: record.id,
       destination: record.destination,
-      price: record.price,
+      carPrice: record.carPrice,
+      motorcyclePrice: record.motorcyclePrice,
       isLocal: record.isLocal,
       createdAt: record.createdAt.toISOString(),
     }));
@@ -1574,22 +1607,28 @@ router.get("/pricing", requireAuth, async (_req: Request, res: Response) => {
 
 // POST /pricing – administrador cadastra ou atualiza tarifas no Neon.
 router.post("/pricing", requireAdmin, async (req: Request, res: Response) => {
-  const { destination, price, isLocal } = req.body as {
+  const { destination, carPrice, motorcyclePrice, isLocal } = req.body as {
     destination: string;
-    price: number;
+    carPrice: number | null;
+    motorcyclePrice: number | null;
     isLocal?: boolean;
   };
+
+  const validPrice = (value: unknown) =>
+    value === null ||
+    (typeof value === "number" && Number.isFinite(value) && value >= 0);
 
   if (
     typeof destination !== "string" ||
     !destination.trim() ||
     destination.trim().length > 200 ||
-    typeof price !== "number" ||
-    !Number.isFinite(price) ||
-    price < 0 ||
+    !Object.prototype.hasOwnProperty.call(req.body, "carPrice") ||
+    !Object.prototype.hasOwnProperty.call(req.body, "motorcyclePrice") ||
+    !validPrice(carPrice) ||
+    !validPrice(motorcyclePrice) ||
     (isLocal !== undefined && typeof isLocal !== "boolean")
   ) {
-    res.status(400).json({ error: "Destino ou preço inválido" });
+    res.status(400).json({ error: "Destino ou tarifas inválidas" });
     return;
   }
 
@@ -1608,7 +1647,12 @@ router.post("/pricing", requireAdmin, async (req: Request, res: Response) => {
 
       if (existing) {
         const [updated] = await tx.update(dbPricingRules)
-          .set({ destination: cleanDestination, price, isLocal: local })
+          .set({
+            destination: cleanDestination,
+            carPrice,
+            motorcyclePrice,
+            isLocal: local,
+          })
           .where(eq(dbPricingRules.id, existing.id))
           .returning();
 
@@ -1618,7 +1662,8 @@ router.post("/pricing", requireAdmin, async (req: Request, res: Response) => {
       const [created] = await tx.insert(dbPricingRules).values({
         id: local ? "local-price" : getId(),
         destination: cleanDestination,
-        price,
+        carPrice,
+        motorcyclePrice,
         isLocal: local,
       }).returning();
 
@@ -1632,7 +1677,8 @@ router.post("/pricing", requireAdmin, async (req: Request, res: Response) => {
     const rule: PriceRule = {
       id: savedRecord.id,
       destination: savedRecord.destination,
-      price: savedRecord.price,
+      carPrice: savedRecord.carPrice,
+      motorcyclePrice: savedRecord.motorcyclePrice,
       isLocal: savedRecord.isLocal,
       createdAt: savedRecord.createdAt.toISOString(),
     };
@@ -1646,7 +1692,6 @@ router.post("/pricing", requireAdmin, async (req: Request, res: Response) => {
     });
   }
 });
-
 // DELETE /pricing/:id – administrador exclui a tarifa do Neon.
 router.delete("/pricing/:id", requireAdmin, async (req: Request, res: Response) => {
   const id = req.params.id as string;
@@ -1661,11 +1706,23 @@ router.delete("/pricing/:id", requireAdmin, async (req: Request, res: Response) 
   }
 });
 
-// GET /pricing/lookup?destination=xxx
-router.get("/pricing/lookup", requireAuth, (req: Request, res: Response) => {
+// GET /pricing/lookup?destination=xxx&vehicleType=car|motorcycle
+router.get("/pricing/lookup", requireAuth, async (req: Request, res: Response) => {
   const destination = (req.query.destination as string) ?? "";
-  const result = lookupPrice(destination);
-  res.json({ price: result?.price ?? null, isLocal: result?.isLocal ?? false });
+  const vehicleType = (req.query.vehicleType as string) ?? "car";
+
+  if (vehicleType !== "car" && vehicleType !== "motorcycle") {
+    res.status(400).json({ error: "Tipo de veículo inválido" });
+    return;
+  }
+
+  const result = await lookupPrice(destination, vehicleType);
+  res.set("Cache-Control", "no-store");
+  res.json({
+    price: result?.price ?? null,
+    isLocal: result?.isLocal ?? false,
+    vehicleType,
+  });
 });
 
 export default router;

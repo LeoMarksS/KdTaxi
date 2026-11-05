@@ -99,11 +99,13 @@ export const rides = pgTable("rides", {
 export const pricingRules = pgTable("pricing_rules", {
   id: varchar("id", { length: 100 }).primaryKey(),
   destination: varchar("destination", { length: 200 }).notNull(),
-  price: numeric("price", { precision: 10, scale: 2, mode: "number" }).notNull(),
+  carPrice: numeric("car_price", { precision: 10, scale: 2, mode: "number" }),
+  motorcyclePrice: numeric("motorcycle_price", { precision: 10, scale: 2, mode: "number" }),
   isLocal: boolean("is_local").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
-  check("pricing_rules_price_check", sql`${table.price} >= 0`),
+  check("pricing_rules_car_price_check", sql`${table.carPrice} is null or ${table.carPrice} >= 0`),
+  check("pricing_rules_motorcycle_price_check", sql`${table.motorcyclePrice} is null or ${table.motorcyclePrice} >= 0`),
   uniqueIndex("pricing_rules_destination_unique")
     .on(sql`lower(${table.destination})`)
     .where(sql`${table.isLocal} = false`),
