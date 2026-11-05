@@ -3,8 +3,9 @@ import { Platform } from "react-native";
 
 const LEGACY_ALERTS_CHANNEL_ID = "ride_alerts_v1";
 const RIDE_ALERTS_CHANNEL_ID = "ride_alerts_v2";
-const CHAT_CHANNEL_ID = "chat_messages_v1";
+const CHAT_CHANNEL_ID = "chat_messages_v2";
 const RIDE_ALERT_SOUND = "ride_alert.wav";
+const CHAT_MESSAGE_SOUND = "chat_message.wav";
 const EAS_PROJECT_ID = "5fb3cb5d-d1c2-4bf7-b2a7-aef44055f44a";
 
 export type LocalNotificationKind = "ride" | "chat";
@@ -42,7 +43,7 @@ export async function initializeNotifications() {
     await Notifications.setNotificationChannelAsync(CHAT_CHANNEL_ID, {
       name: "Mensagens do chat",
       importance: Notifications.AndroidImportance.HIGH,
-      sound: "default",
+      sound: CHAT_MESSAGE_SOUND,
       vibrationPattern: [0, 180, 100, 180],
       enableVibrate: true,
       showBadge: true,
@@ -103,7 +104,7 @@ export async function scheduleLocalNotification(
       content: {
         title,
         body,
-        sound: isChat ? "default" : RIDE_ALERT_SOUND,
+        sound: isChat ? CHAT_MESSAGE_SOUND : RIDE_ALERT_SOUND,
       },
       trigger: Platform.OS === "android"
         ? { channelId: isChat ? CHAT_CHANNEL_ID : RIDE_ALERTS_CHANNEL_ID }

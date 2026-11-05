@@ -174,6 +174,10 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 export const API_BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
 
+function chatReadKey(userId: string, rideId: string) {
+  return `kd_chat_read:${userId}:${rideId}`;
+}
+
 // Play a beep sound to alert driver of incoming ride
 async function playRideRequestSound() {
   if (Platform.OS === "web") {
@@ -235,6 +239,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const isDriverOnlineRef = useRef(false);
   // Stores the rideId whose chat is currently visible (null = no chat screen open)
   const isChatOpenRef = useRef<string | null>(null);
+  const chatMessagesRef = useRef<Record<string, ChatMessage[]>>({});
+  const readCursorsRef = useRef<Record<string, string>>({});
   // Timeout handles for the repeating ride-alert sound (cleared on accept/decline)
   const soundTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -242,6 +248,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { activeRideRef.current = activeRide; }, [activeRide]);
   useEffect(() => { activeRidesRef.current = activeRides; }, [activeRides]);
   useEffect(() => { isDriverOnlineRef.current = isDriverOnline; }, [isDriverOnline]);
+  useEffect(() => { chatMessagesRef.current = chatMessagesByRide; }, [chatMessagesByRide]);
+
+  const markReadThrough = useCallback((rideId: string, messageId: string) => {
+    const currentUser = userRef.current;
+    if (!currentUser) return;
+    const key = chatReadKey(currentUser.id, rideId);
+    readCursorsRef.current[key] = messageId;
+    void AsyncStorage.setItem(key, messageId).catch(() => {});
+  }, []);
 
   // Aguarda a recuperação completa da sessão antes de liberar a navegação.
   useEffect(() => {
@@ -599,6 +614,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             }
           }
         }
+
+        const chatRides = all.filter((r) =>
+          (r.status === "accepted" || r.status === "in_progress") &&
+          (r.clientId === me.id || r.driverId === me.id)
+        );
+        await Promise.all(chatRides.map(async (ride) => {
+          try {
+            const response = await authFetch(`/rides/${ride.id}/chat`);
+            if (!response.ok) return;
+            const history = await response.json() as ChatMessage[];
+            if (userRef.current?.id !== me.id) return;
+            setChatMessagesByRide((prev) => ({ ...prev, [ride.id]: history }));
+            if (isChatOpenRef.current === ride.id) {
+              const latest = history.at(-1);
+              if (latest) markReadThrough(ride.id, latest.id);
+              setUnreadByRide((prev) => ({ ...prev, [ride.id]: 0 }));
+              return;
+            }
+            const key = chatReadKey(me.id, ride.id);
+            const cursor = readCursorsRef.current[key] ?? await AsyncStorage.getItem(key);
+            if (cursor) readCursorsRef.current[key] = cursor;
+            if (isChatOpenRef.current === ride.id) return;
+            const index = cursor ? history.findIndex((m) => m.id === cursor) : -1;
+            const unread = history.slice(index + 1).filter((m) => m.senderId !== me.id).length;
+            setUnreadByRide((prev) => ({ ...prev, [ride.id]: unread }));
+          } catch {}
+        }));
       } catch {}
     };
 
@@ -610,7 +652,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       void reconcile();
     };
     socket.on("connect", onConnect);
-    const appStateSubscription = AppState.addEventListener("change", reportAppState);
+    const appStateSubscription = AppState.addEventListener("change", (state) => {
+      reportAppState(state);
+      if (state === "active" && socket.connected) void reconcile();
+    });
 
     socket.on("nova_corrida", (ride: Ride) => {
       const currentUser = userRef.current;
@@ -717,7 +762,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (isChatOpenRef.current !== msg.rideId) {
           setUnreadByRide((prev) => ({ ...prev, [msg.rideId]: (prev[msg.rideId] ?? 0) + 1 }));
           scheduleLocalNotification(`Mensagem de ${msg.senderName}`, msg.text, "chat");
+        } else {
+          markReadThrough(msg.rideId, msg.id);
         }
+      } else if (isChatOpenRef.current === msg.rideId) {
+        markReadThrough(msg.rideId, msg.id);
       }
     });
 
@@ -730,7 +779,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       soundTimersRef.current.forEach(clearTimeout);
       soundTimersRef.current = [];
     };
-  }, [user, token]);
+  }, [user, token, authFetch, markReadThrough]);
 
   const requestRide = useCallback(async (
     origin: string,
@@ -856,7 +905,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const markChatRead = useCallback((rideId: string) => {
     setUnreadByRide((prev) => ({ ...prev, [rideId]: 0 }));
-  }, []);
+    const latest = chatMessagesRef.current[rideId]?.at(-1);
+    if (latest) markReadThrough(rideId, latest.id);
+  }, [markReadThrough]);
 
   const fetchChatHistory = useCallback(async (rideId: string) => {
     try {
@@ -871,8 +922,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         return { ...prev, [rideId]: merged };
       });
+      if (isChatOpenRef.current === rideId) {
+        const latest = history.at(-1);
+        if (latest) markReadThrough(rideId, latest.id);
+        setUnreadByRide((prev) => ({ ...prev, [rideId]: 0 }));
+      }
     } catch {}
-  }, [authFetch]);
+  }, [authFetch, markReadThrough]);
 
   const logout = useCallback(() => {
     if (tokenRef.current) {
@@ -885,6 +941,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setPendingRides([]);
     setChatMessagesByRide({});
     setUnreadByRide({});
+    readCursorsRef.current = {};
     setMyRides([]);
     setFinishedRideToRate(null);
     setDriverOnlineState(false);
