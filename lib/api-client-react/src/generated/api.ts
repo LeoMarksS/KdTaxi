@@ -36,10 +36,6 @@ import type {
 import { customFetch } from "../custom-fetch";
 import type { ErrorType, BodyType } from "../custom-fetch";
 
-type AwaitedInput<T> = PromiseLike<T> | T;
-
-type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
-
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 /**
@@ -748,6 +744,90 @@ export const useUpdateAdminUser = <
 };
 
 /**
+ * @summary Delete a non-admin user account
+ */
+export const getDeleteAdminUserUrl = (id: string) => {
+  return `/api/admin/users/${id}`;
+};
+
+export const deleteAdminUser = async (
+  id: string,
+  options?: RequestInit,
+): Promise<OkResult> => {
+  return customFetch<OkResult>(getDeleteAdminUserUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteAdminUserMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteAdminUser>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteAdminUser>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["deleteAdminUser"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteAdminUser>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteAdminUser(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteAdminUserMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteAdminUser>>
+>;
+
+export type DeleteAdminUserMutationError = ErrorType<void>;
+
+/**
+ * @summary Delete a non-admin user account
+ */
+export const useDeleteAdminUser = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteAdminUser>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteAdminUser>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDeleteAdminUserMutationOptions(options));
+};
+
+/**
  * @summary Approve or reject a driver
  */
 export const getDecideDriverApprovalUrl = (id: string) => {
@@ -919,90 +999,6 @@ export const useUpdateDriverVehicle = <
   TContext
 > => {
   return useMutation(getUpdateDriverVehicleMutationOptions(options));
-};
-
-/**
- * @summary Delete a non-admin user account
- */
-export const getDeleteAdminUserUrl = (id: string) => {
-  return `/api/users/${id}/vehicle`;
-};
-
-export const deleteAdminUser = async (
-  id: string,
-  options?: RequestInit,
-): Promise<OkResult> => {
-  return customFetch<OkResult>(getDeleteAdminUserUrl(id), {
-    ...options,
-    method: "DELETE",
-  });
-};
-
-export const getDeleteAdminUserMutationOptions = <
-  TError = ErrorType<void>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof deleteAdminUser>>,
-    TError,
-    { id: string },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof deleteAdminUser>>,
-  TError,
-  { id: string },
-  TContext
-> => {
-  const mutationKey = ["deleteAdminUser"];
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof deleteAdminUser>>,
-    { id: string }
-  > = (props) => {
-    const { id } = props ?? {};
-
-    return deleteAdminUser(id, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type DeleteAdminUserMutationResult = NonNullable<
-  Awaited<ReturnType<typeof deleteAdminUser>>
->;
-
-export type DeleteAdminUserMutationError = ErrorType<void>;
-
-/**
- * @summary Delete a non-admin user account
- */
-export const useDeleteAdminUser = <
-  TError = ErrorType<void>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof deleteAdminUser>>,
-    TError,
-    { id: string },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationResult<
-  Awaited<ReturnType<typeof deleteAdminUser>>,
-  TError,
-  { id: string },
-  TContext
-> => {
-  return useMutation(getDeleteAdminUserMutationOptions(options));
 };
 
 /**

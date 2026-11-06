@@ -188,6 +188,29 @@ paths:
                 $ref: "#/components/schemas/User"
         "403":
           description: Admin account required
+    delete:
+      operationId: deleteAdminUser
+      tags: [admin, users]
+      summary: Delete a non-admin user account
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Account deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResult"
+        "403":
+          description: Admin account required or the target is an admin
+        "404":
+          description: User not found
   /admin/drivers/{id}/approval:
     post:
       operationId: decideDriverApproval
@@ -238,29 +261,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/User"
-        "404":
-          description: User not found
-    delete:
-      operationId: deleteAdminUser
-      tags: [admin, users]
-      summary: Delete a non-admin user account
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Account deleted
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OkResult"
-        "403":
-          description: Admin account required or the target is an admin
         "404":
           description: User not found
   /pricing:
