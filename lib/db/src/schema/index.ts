@@ -29,6 +29,7 @@ export const users = pgTable("users", {
   approvalStatus: varchar("approval_status", { length: 20 }).notNull().default("approved"),
   active: boolean("active").notNull().default(true),
   isOnline: boolean("is_online").notNull().default(false),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   photo: text("photo"),
   pushToken: text("push_token"),
   rating: doublePrecision("rating").notNull().default(0),

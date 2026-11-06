@@ -252,7 +252,7 @@ export async function initializeAuthStore(): Promise<void> {
 
   const userRecords = await db.select().from(dbUsers);
   users.clear();
-  for (const record of userRecords) {
+  for (const record of userRecords.filter((r) => !r.deletedAt)) {
     users.set(record.id, userFromRecord(record));
   }
 
@@ -343,7 +343,7 @@ async function getUserByToken(token: string | undefined): Promise<User | undefin
   if (!user) {
     const [record] = await db.select().from(dbUsers)
       .where(eq(dbUsers.id, session.userId)).limit(1);
-    if (!record) return undefined;
+    if (!record || record.deletedAt) return undefined;
     user = userFromRecord(record);
     users.set(user.id, user);
   }
@@ -807,7 +807,7 @@ router.put("/users/:id", requireAuth, async (req: Request, res: Response) => {
 // GET /users – admin only, list of clients/drivers without passwords or push tokens
 router.get("/users", requireAdmin, async (_req: Request, res: Response) => {
   try {
-    const records = await db.select().from(dbUsers);
+    const records = await db.select().from(dbUsers).where(isNull(dbUsers.deletedAt));
 
     for (const record of records) {
       const user = userFromRecord(record);
@@ -839,7 +839,7 @@ router.get("/users/:id", requireAuth, async (req: Request, res: Response) => {
       .where(eq(dbUsers.id, id))
       .limit(1);
 
-    if (!record) {
+    if (!record || record.deletedAt) {
       users.delete(id);
       res.status(404).json({ error: "Not found" });
       return;
@@ -1149,9 +1149,28 @@ router.delete("/admin/users/:id", requireAdmin, async (req: Request, res: Respon
   }
 
   try {
-    await db.delete(dbSessions).where(eq(dbSessions.userId, id));
-    await db.delete(dbUsers).where(eq(dbUsers.id, id));
-
+    const removed = await db.transaction(async (tx) => {
+      // Serializa exclusões concorrentes da mesma conta.
+      await tx.select({ id: dbUsers.id }).from(dbUsers).where(eq(dbUsers.id, id)).for("update");
+      const [activeRide] = await tx.select({ id: dbRides.id }).from(dbRides).where(and(
+        or(eq(dbRides.clientId, id), eq(dbRides.driverId, id)),
+        inArray(dbRides.status, ["waiting", "accepted", "in_progress"]),
+      )).limit(1);
+      if (activeRide) return false;
+      await tx.delete(dbSessions).where(eq(dbSessions.userId, id));
+      await tx.update(dbUsers).set({
+        deletedAt: new Date(), active: false, isOnline: false,
+        name: "Conta excluída", phone: `deleted:${crypto.randomBytes(10).toString("hex")}`,
+        passwordHash: bcrypt.hashSync(crypto.randomBytes(32).toString("hex"), 10),
+        photo: null, pushToken: null,
+        vehicleBrand: null, vehicleModel: null, vehicleColor: null, vehiclePlate: null,
+      }).where(eq(dbUsers.id, id));
+      return true;
+    });
+    if (!removed) {
+      res.status(409).json({ error: "Finalize ou cancele as corridas ativas desta conta antes de excluí-la." });
+      return;
+    }
     for (const [token, session] of sessions.entries()) {
       if (session.userId === id) {
         sessions.delete(token);
@@ -1159,6 +1178,10 @@ router.delete("/admin/users/:id", requireAdmin, async (req: Request, res: Respon
     }
 
     users.delete(id);
+    try {
+      const sockets = await socketServer?.in(`user:${id}`).fetchSockets();
+      sockets?.forEach((socket) => socket.disconnect(true));
+    } catch { console.warn("[admin] Conta excluída; conexão antiga será recusada na próxima autenticação."); }
     res.json({ ok: true });
   } catch (error) {
     console.error("[admin] Erro ao excluir usuário:", error);
@@ -1188,7 +1211,7 @@ router.get("/admin/stats", requireAdmin, async (_req: Request, res: Response) =>
     ]);
 
     const allRideList = rideRecords.map(rideFromRecord);
-    const allUserList = userRecords.map(userFromRecord);
+    const allUserList = userRecords.filter((r) => !r.deletedAt).map(userFromRecord);
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
@@ -1374,7 +1397,10 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
   };
 
   try {
-    await db.insert(dbRides).values({
+    const created = await db.transaction(async (tx) => {
+      const [account] = await tx.select().from(dbUsers).where(eq(dbUsers.id, clientId)).for("update");
+      if (!account?.active || account.deletedAt) return false;
+      await tx.insert(dbRides).values({
       id: ride.id,
       clientId: ride.clientId,
       clientName: ride.clientName,
@@ -1397,6 +1423,9 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
       acceptedAt: null,
       finishedAt: null,
     });
+      return true;
+    });
+    if (!created) { res.status(403).json({ error: "Conta indisponível" }); return; }
   } catch (error) {
     console.error("[rides] Erro ao salvar nova corrida:", error);
     res.status(500).json({ error: "Não foi possível registrar a corrida" });
@@ -1454,7 +1483,10 @@ router.post("/accept-ride", requireAuth, async (req: Request, res: Response) => 
 
   const acceptedAt = new Date();
   try {
-    const [updatedRide] = await db.update(dbRides)
+    const updatedRide = await db.transaction(async (tx) => {
+      const [account] = await tx.select().from(dbUsers).where(eq(dbUsers.id, driver.id)).for("update");
+      if (!account?.active || account.deletedAt || account.approvalStatus !== "approved" || !account.isOnline) return undefined;
+      const [accepted] = await tx.update(dbRides)
       .set({
         driverId: driver.id,
         driverName: driver.name,
@@ -1470,6 +1502,8 @@ router.post("/accept-ride", requireAuth, async (req: Request, res: Response) => 
       })
       .where(and(eq(dbRides.id, rideId), eq(dbRides.status, "waiting")))
       .returning({ id: dbRides.id });
+      return accepted;
+    });
 
     if (!updatedRide) {
       res.status(409).json({ error: "Ride already taken" });

@@ -1,23 +1,17 @@
-modules = ["nodejs-24", "python-3.11", "postgresql-16"]
+modules = ["nodejs-24"]
 
-[deployment]
-router = "application"
-deploymentTarget = "autoscale"
+[[ports]]
+localPort = 5000
+externalPort = 5000
+exposeLocalhost = true
 
-[deployment.postBuild]
-args = ["pnpm", "store", "prune"]
-env = { "CI" = "true" }
+[[ports]]
+localPort = 5001
+externalPort = 5173
 
-[workflows]
-runButton = "Project"
-
-[agent]
-stack = "PNPM_WORKSPACE"
-expertMode = true
-
-[postMerge]
-path = "scripts/post-merge.sh"
-timeoutMs = 20000
+[[ports]]
+localPort = 5055
+externalPort = 4200
 
 [[ports]]
 localPort = 8080
@@ -28,12 +22,23 @@ localPort = 8081
 externalPort = 80
 
 [[ports]]
-localPort = 21030
-externalPort = 3000
+localPort = 8082
+externalPort = 3002
 exposeLocalhost = true
 
-[nix]
-channel = "stable-25_05"
+[[ports]]
+localPort = 8083
+externalPort = 3003
+exposeLocalhost = true
 
-[objectStorage]
-defaultBucketID = "replit-objstore-5bb8044d-2f4f-469b-bdab-f8407981cfa0"
+[[ports]]
+localPort = 21030
+externalPort = 3001
+exposeLocalhost = true
+
+[[ports]]
+localPort = 22608
+externalPort = 3000
+
+[nix]
+packages = ["iproute"]

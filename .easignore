@@ -1,0 +1,73 @@
+# See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
+
+# compiled output
+dist
+tmp
+out-tsc
+*.tsbuildinfo
+.expo
+.expo-shared
+
+# dependencies
+node_modules
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# misc
+/.sass-cache
+/connect.lock
+/coverage
+/libpeerconnection.log
+npm-debug.log
+yarn-error.log
+testem.log
+/typings
+
+# System Files
+.DS_Store
+Thumbs.db
+
+.cursor/rules/nx-rules.mdc
+.github/instructions/nx.instructions.md
+
+# Replit
+.cache/
+.local/
+
+# Local backups and credentials
+backups/
+*.bak
+*.logout-bak
+*.tmp
+.env
+.env.*
+.config/
+*.tar.gz
+
+# Archive only the current workspace
+.git
+attached_assets/
+KD-Taxi*-BK*/
+**/backups/**
+**/*.bak
+**/*.logout-bak
+**/*.tmp
+
+/google-services.json
+
+*.zip
+artifacts/mockup-sandbox/
