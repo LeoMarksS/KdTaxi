@@ -838,6 +838,15 @@ router.post("/users/:id/active", requireAuth, async (req: Request, res: Response
   const active = req.body.active === true;
 
   try {
+    // APKs anteriores usam /active para o botão Online/Offline do motorista.
+    // Mantenha a conta ativa e grave somente a disponibilidade.
+    if (user.mode === "driver") {
+      await db.update(dbUsers).set({ isOnline: active }).where(eq(dbUsers.id, id));
+      user.isOnline = active;
+      res.json(safeUser(user));
+      return;
+    }
+
     // Impede que o único administrador ativo desative a própria conta.
     if (!active && user.mode === "admin" && user.active) {
       const activeAdmins = await db.select({ id: dbUsers.id })
