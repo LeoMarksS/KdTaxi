@@ -265,7 +265,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       AsyncStorage.getItem("kd_driver_online"),
       AsyncStorage.getItem("kd_active_ride"),
     ]).then(([userData, tokenData, driverOnline, activeRideData]) => {
-      if (userData) setUserState(JSON.parse(userData) as User);
+      const cachedUser = userData ? JSON.parse(userData) as User : null;
+      if (cachedUser?.mode === "admin") {
+        void AsyncStorage.multiRemove(["kd_user", "kd_token", "kd_driver_online", "kd_active_ride"])
+          .catch(() => console.warn("Não foi possível limpar a sessão administrativa deste aparelho."));
+        setIsAuthLoading(false);
+        return;
+      }
+      if (cachedUser) setUserState(cachedUser);
       if (tokenData) {
         tokenRef.current = tokenData;
         setTokenState(tokenData);
@@ -426,6 +433,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return { ok: false, error: data.error ?? "Credenciais inválidas" };
+      if (data.user?.mode === "admin") {
+        return { ok: false, error: "A administração está disponível no painel web do KD TAXI." };
+      }
       setToken(data.token);
       setUser(data.user as User);
       return { ok: true };
