@@ -163,6 +163,14 @@ function rideFromRecord(record: typeof dbRides.$inferSelect): Ride {
   };
 }
 
+// O telefone do passageiro só é devolvido a ele próprio ou ao administrador.
+function rideForViewer(ride: Ride, viewer: User) {
+  if (viewer.mode === "admin" ||
+      (viewer.mode === "client" && viewer.id === ride.clientId)) return ride;
+  const { clientPhone: _clientPhone, ...withoutPhone } = ride;
+  return withoutPhone;
+}
+
 // Carrega usuários e sessões persistidos antes de o servidor receber conexões.
 export async function initializeAuthStore(): Promise<void> {
   const [existingAdmin] = await db.select().from(dbUsers)
@@ -1255,11 +1263,10 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
   rides.set(ride.id, ride);
 
   const io = req.app.get("io");
-  if (io) io.to(`driver-vehicle:${ride.vehicleType}`).emit("nova_corrida", ride);
-
   for (const u of users.values()) {
-    if (u.mode === "driver" && u.active && u.pushToken &&
-      isDriverOnline(u.id) && driverCanTakeRide(u, ride)) {
+    if (isDriverOnline(u.id) && driverCanTakeRide(u, ride)) {
+      if (io) io.to(`user:${u.id}`).emit("nova_corrida", rideForViewer(ride, u));
+      if (!u.pushToken) continue;
       // Em primeiro plano, o Socket.IO já toca o alerta local do aplicativo.
       // Em segundo plano, enviamos o push com o canal de som personalizado.
       if (await isUserForeground(u.id)) continue;
@@ -1291,6 +1298,10 @@ router.post("/accept-ride", requireAuth, async (req: Request, res: Response) => 
 
   if (!driverCanTakeRide(driver, ride)) {
     res.status(403).json({ error: "Esta corrida é de outra categoria de veículo" });
+    return;
+  }
+  if (!isDriverOnline(driver.id)) {
+    res.status(403).json({ error: "Fique online para aceitar corridas" });
     return;
   }
 
@@ -1342,7 +1353,7 @@ router.post("/accept-ride", requireAuth, async (req: Request, res: Response) => 
   const io = req.app.get("io");
   if (io) {
     io.to(`user:${ride.clientId}`).emit("corrida_aceita", ride);
-    io.to(`user:${driver.id}`).emit("corrida_aceita", ride);
+    io.to(`user:${driver.id}`).emit("corrida_aceita", rideForViewer(ride, driver));
     io.to(`driver-vehicle:${ride.vehicleType}`).emit("corrida_indisponivel", ride.id);
   }
 
@@ -1351,7 +1362,7 @@ router.post("/accept-ride", requireAuth, async (req: Request, res: Response) => 
     sendPushNotification(client.pushToken, "Motorista encontrado!", `${driver.name} está a caminho`, { rideId });
   }
 
-  res.json(ride);
+  res.json(rideForViewer(ride, driver));
 });
 
 // POST /start-ride
@@ -1404,7 +1415,7 @@ router.post("/start-ride", requireAuth, async (req: Request, res: Response) => {
   if (io) {
     io.to(`user:${ride.clientId}`).emit("corrida_iniciada", ride);
     if (ride.driverId) {
-      io.to(`user:${ride.driverId}`).emit("corrida_iniciada", ride);
+      io.to(`user:${ride.driverId}`).emit("corrida_iniciada", rideForViewer(ride, driver));
     }
   }
 
@@ -1413,7 +1424,7 @@ router.post("/start-ride", requireAuth, async (req: Request, res: Response) => {
     sendPushNotification(client.pushToken, "Corrida iniciada!", "Sua corrida está em andamento", { rideId });
   }
 
-  res.json(ride);
+  res.json(rideForViewer(ride, driver));
 });
 
 // POST /finish-ride
@@ -1458,7 +1469,7 @@ router.post("/finish-ride", requireAuth, async (req: Request, res: Response) => 
   if (io) {
     io.to(`user:${ride.clientId}`).emit("corrida_finalizada", ride);
     if (ride.driverId) {
-      io.to(`user:${ride.driverId}`).emit("corrida_finalizada", ride);
+      io.to(`user:${ride.driverId}`).emit("corrida_finalizada", rideForViewer(ride, req.authUser!));
     }
   }
 
@@ -1467,7 +1478,7 @@ router.post("/finish-ride", requireAuth, async (req: Request, res: Response) => 
     sendPushNotification(client.pushToken, "Corrida finalizada!", "Avalie sua experiência", { rideId });
   }
 
-  res.json(ride);
+  res.json(rideForViewer(ride, req.authUser!));
 });
 
 // POST /cancel-ride
@@ -1515,7 +1526,7 @@ router.post("/cancel-ride", requireAuth, async (req: Request, res: Response) => 
       io.to(`user:${ride.driverId}`).emit("corrida_cancelada", ride.id);
     }
   }
-  res.json(ride);
+  res.json(rideForViewer(ride, req.authUser!));
 });
 
 // GET /rides/:id/chat – recupera o histórico persistido no Neon.
@@ -1658,7 +1669,7 @@ router.post("/rides/:id/rate", requireAuth, async (req: Request, res: Response) 
     rides.set(updatedRide.id, updatedRide);
     users.set(result.updatedUser.id, userFromRecord(result.updatedUser));
 
-    res.json(updatedRide);
+    res.json(rideForViewer(updatedRide, req.authUser!));
   } catch (error) {
     console.error("[rides] Erro ao salvar avaliação no Neon:", error);
     res.status(500).json({ error: "Não foi possível salvar a avaliação" });
@@ -1681,13 +1692,15 @@ router.get("/rides", requireAuth, async (req: Request, res: Response) => {
         ride.driverId === req.authUser!.id ||
         (ride.status === "waiting" && driverCanTakeRide(req.authUser!, ride))
       )
-      : allRides;
+      : req.authUser!.mode === "client"
+        ? allRides.filter((ride) => ride.clientId === req.authUser!.id)
+        : allRides;
 
     visibleRides.sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
 
-    res.json(visibleRides);
+    res.json(visibleRides.map((ride) => rideForViewer(ride, req.authUser!)));
   } catch (error) {
     console.error("[rides] Erro ao consultar corridas no Neon:", error);
     res.status(500).json({ error: "Não foi possível consultar as corridas" });
@@ -1713,7 +1726,7 @@ router.get("/users/:id/rides", requireAuth, async (req: Request, res: Response) 
       .map(rideFromRecord)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-    res.json(userRides);
+    res.json(userRides.map((ride) => rideForViewer(ride, req.authUser!)));
   } catch (error) {
     console.error("[rides] Erro ao consultar histórico no Neon:", error);
     res.status(500).json({ error: "Não foi possível consultar o histórico de corridas" });
