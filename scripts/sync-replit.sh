@@ -28,7 +28,7 @@ for name in sorted(untracked & target):
 PY
 git stash push -m "antes-unificacao-$kd_stamp"
 git switch -C main origin/main
-pnpm install --frozen-lockfile
+CI=true pnpm install --frozen-lockfile
 pnpm run typecheck:libs
 pnpm --filter @workspace/kd-taxi typecheck
 pnpm --filter @workspace/api-server typecheck
