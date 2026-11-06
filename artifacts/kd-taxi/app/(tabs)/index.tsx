@@ -3,7 +3,6 @@ import { useApp } from "@/context/AppContext";
 import { ActivityIndicator, View } from "react-native";
 import ClientHome from "@/screens/ClientHome";
 import DriverHome from "@/screens/DriverHome";
-import AdminHome from "@/screens/AdminHome";
 
 export default function HomeScreen() {
   const { user, isAuthLoading } = useApp();
@@ -19,6 +18,5 @@ export default function HomeScreen() {
   if (!user) return <Redirect href="/login" />;
   if (user.mode === "client") return <ClientHome />;
   if (user.mode === "driver") return <DriverHome />;
-  if (user.mode === "admin") return <AdminHome />;
   return <Redirect href="/login" />;
 }

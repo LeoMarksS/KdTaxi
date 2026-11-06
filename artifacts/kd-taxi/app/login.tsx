@@ -168,9 +168,9 @@ export default function LoginScreen() {
           <View style={s.form}>
             {tab === "login" ? (
               <>
-                <Text style={s.loginHint}>Entre com seu telefone e senha. O sistema identifica automaticamente se você é cliente, motorista ou administrador.</Text>
+                <Text style={s.loginHint}>Entre com seu telefone e senha para acessar sua conta de cliente ou motorista.</Text>
                 <Text style={s.label}>Telefone</Text>
-                <TextInput style={s.input} value={phone} onChangeText={setPhone} placeholder="Telefone ou admin" placeholderTextColor={colors.mutedForeground} keyboardType="default" autoCapitalize="none" autoCorrect={false} autoComplete="username" />
+                <TextInput style={s.input} value={phone} onChangeText={setPhone} placeholder="(00) 00000-0000" placeholderTextColor={colors.mutedForeground} keyboardType="phone-pad" autoCapitalize="none" autoCorrect={false} autoComplete="tel" />
                 <Text style={s.label}>Senha</Text>
                 <View style={s.passwordRow}>
                   <TextInput style={s.passwordInput} value={password} onChangeText={setPassword} placeholder="Sua senha" placeholderTextColor={colors.mutedForeground} secureTextEntry={!showPassword} autoCapitalize="none" autoCorrect={false} />
