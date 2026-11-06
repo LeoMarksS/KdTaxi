@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import React, {
   createContext,
   useCallback,
@@ -322,20 +322,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Keep large profile photos in memory, not in AsyncStorage. Rehydrate them
-  // from the authenticated profile endpoint after login or app restart.
+  // Refresh approval and profile details on login and when the app returns.
+  // Keep large photos in memory rather than AsyncStorage.
   useEffect(() => {
     const userId = user?.id;
     if (!userId || !token) return;
     let cancelled = false;
-    void authFetch(`/users/${userId}`)
-      .then(async (response) => {
-        if (!response.ok || cancelled) return;
-        const refreshedUser = await response.json() as User;
-        if (!cancelled) setUser(refreshedUser);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
+    const refreshUser = () => {
+      void authFetch(`/users/${userId}`)
+        .then(async (response) => {
+          if (!response.ok || cancelled) return;
+          const refreshedUser = await response.json() as User;
+          if (!cancelled) setUser(refreshedUser);
+        })
+        .catch(() => {});
+    };
+    refreshUser();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") refreshUser();
+    });
+    return () => { cancelled = true; subscription.remove(); };
   }, [user?.id, token, authFetch, setUser]);
 
   const setDriverOnline = useCallback((online: boolean) => {
