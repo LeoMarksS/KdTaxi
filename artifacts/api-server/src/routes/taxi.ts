@@ -11,17 +11,11 @@ const router = Router();
 
 let socketServer: SocketIOServer | undefined;
 
-// Disponibilidade segue explicitamente o botão Online do motorista,
-// inclusive quando o Android suspende a conexão do aplicativo.
-const driverAvailability = new Set<string>();
-
-export function setDriverAvailability(userId: string, online: boolean): void {
-  if (online) driverAvailability.add(userId);
-  else driverAvailability.delete(userId);
-}
-
 export function isDriverOnline(userId: string): boolean {
-  return driverAvailability.has(userId);
+  const user = users.get(userId);
+  return user?.mode === "driver" && user.active && user.isOnline === true &&
+    Array.from(sessions.values()).some((session) =>
+      session.userId === userId && session.expiresAt > Date.now());
 }
 
 export async function isUserForeground(userId: string): Promise<boolean> {
@@ -42,6 +36,7 @@ interface User {
   mode: "client" | "driver" | "admin";
   vehicleType?: "car" | "motorcycle";
   active: boolean;
+  isOnline: boolean;
   photo?: string;
   pushToken?: string;
   rating: number;
@@ -131,6 +126,7 @@ function userFromRecord(record: typeof dbUsers.$inferSelect): User {
     vehicleType: record.vehicleType === "motorcycle" ? "motorcycle" :
       record.vehicleType === "car" ? "car" : undefined,
     active: record.active,
+    isOnline: record.isOnline,
     photo: record.photo ?? undefined,
     pushToken: record.pushToken ?? undefined,
     rating: record.rating,
@@ -556,7 +552,7 @@ router.post("/register", registerLimiter, async (req: Request, res: Response) =>
     passwordHash: bcrypt.hashSync(password, 10),
     mode,
     vehicleType: mode === "driver" && vehicleType === "motorcycle" ? "motorcycle" : mode === "driver" ? "car" : undefined,
-    active: true, rating: 0, rideCount: 0,
+    active: true, isOnline: false, rating: 0, rideCount: 0,
     photo, createdAt: new Date().toISOString(),
   };
   try {
@@ -679,13 +675,23 @@ router.post("/change-password", requireAuth, changePasswordLimiter, async (req: 
 });
 
 router.post("/logout", requireAuth, async (req: Request, res: Response) => {
-  const auth = req.headers.authorization;
-  const token = auth?.slice(7);
-  if (token) {
-    await db.delete(dbSessions).where(eq(dbSessions.token, token));
-    sessions.delete(token);
+  try {
+    const user = req.authUser!;
+    const auth = req.headers.authorization;
+    const token = auth?.slice(7);
+    await db.transaction(async (tx) => {
+      if (user.mode === "driver") {
+        await tx.update(dbUsers).set({ isOnline: false }).where(eq(dbUsers.id, user.id));
+      }
+      if (token) await tx.delete(dbSessions).where(eq(dbSessions.token, token));
+    });
+    if (user.mode === "driver") user.isOnline = false;
+    if (token) sessions.delete(token);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("[auth] Erro ao encerrar sessão:", error);
+    res.status(500).json({ error: "Não foi possível encerrar a sessão" });
   }
-  res.json({ ok: true });
 });
 
 // PUT /users/:id – a user may only edit their own profile
@@ -803,8 +809,15 @@ router.post("/users/:id/availability", requireAuth, async (req: Request, res: Re
     return;
   }
 
-  setDriverAvailability(id, req.body.online === true);
-  res.json({ isOnline: isDriverOnline(id) });
+  try {
+    const online = req.body.online === true;
+    await db.update(dbUsers).set({ isOnline: online }).where(eq(dbUsers.id, id));
+    user.isOnline = online;
+    res.json({ isOnline: isDriverOnline(id) });
+  } catch (error) {
+    console.error("[availability] Erro ao salvar disponibilidade:", error);
+    res.status(500).json({ error: "Não foi possível salvar a disponibilidade" });
+  }
 });
 
 // POST /users/:id/active – self only
@@ -840,10 +853,11 @@ router.post("/users/:id/active", requireAuth, async (req: Request, res: Response
     }
 
     await db.update(dbUsers)
-      .set({ active })
+      .set({ active, ...(!active ? { isOnline: false } : {}) })
       .where(eq(dbUsers.id, id));
 
     user.active = active;
+    if (!active) user.isOnline = false;
     if (!active) await revokeOtherUserSessions(id);
     res.json(safeUser(user));
   } catch (error) {
@@ -926,6 +940,7 @@ router.put("/admin/users/:id", requireAdmin, async (req: Request, res: Response)
         mode: updatedMode,
         vehicleType: updatedVehicleType ?? null,
         active: updatedActive,
+        isOnline: updatedMode === "driver" && updatedActive ? user.isOnline : false,
         passwordHash: updatedPasswordHash,
       })
       .where(eq(dbUsers.id, id));
@@ -935,6 +950,7 @@ router.put("/admin/users/:id", requireAdmin, async (req: Request, res: Response)
     user.mode = updatedMode;
     if (vehicleType !== undefined) user.vehicleType = updatedVehicleType;
     user.active = updatedActive;
+    if (updatedMode !== "driver" || !updatedActive) user.isOnline = false;
     user.passwordHash = updatedPasswordHash;
 
     if (!updatedActive) {
@@ -1102,6 +1118,7 @@ router.post("/admin/users", requireAdmin, async (req: Request, res: Response) =>
       ? { vehicleType: (vehicleType as User["vehicleType"]) ?? "car" }
       : {}),
     active: resolvedMode !== "driver",
+    isOnline: false,
     rating: 0,
     rideCount: 0,
     createdAt: new Date().toISOString(),

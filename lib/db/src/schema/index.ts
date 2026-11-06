@@ -23,6 +23,7 @@ export const users = pgTable("users", {
   mode: varchar("mode", { length: 20 }).notNull(),
   vehicleType: varchar("vehicle_type", { length: 20 }),
   active: boolean("active").notNull().default(true),
+  isOnline: boolean("is_online").notNull().default(false),
   photo: text("photo"),
   pushToken: text("push_token"),
   rating: doublePrecision("rating").notNull().default(0),
