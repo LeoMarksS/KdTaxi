@@ -264,6 +264,17 @@ export const UpdateAdminUserResponse = zod.object({
 });
 
 /**
+ * @summary Delete a non-admin user account
+ */
+export const DeleteAdminUserParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const DeleteAdminUserResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
  * @summary Approve or reject a driver
  */
 export const DecideDriverApprovalParams = zod.object({
@@ -341,17 +352,6 @@ export const UpdateDriverVehicleResponse = zod.object({
   rating: zod.number(),
   rideCount: zod.number(),
   createdAt: zod.coerce.date(),
-});
-
-/**
- * @summary Delete a non-admin user account
- */
-export const DeleteAdminUserParams = zod.object({
-  id: zod.coerce.string(),
-});
-
-export const DeleteAdminUserResponse = zod.object({
-  ok: zod.boolean(),
 });
 
 /**
