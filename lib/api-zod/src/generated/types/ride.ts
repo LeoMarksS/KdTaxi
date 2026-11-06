@@ -13,7 +13,7 @@ export interface Ride {
   id: string;
   clientId: string;
   clientName: string;
-  clientPhone: string;
+  clientPhone?: string;
   /** @nullable */
   clientPhoto?: string | null;
   /** @nullable */
@@ -30,6 +30,14 @@ export interface Ride {
   driverAvgRating?: number | null;
   /** @nullable */
   driverRideCount?: number | null;
+  /** @nullable */
+  driverVehicleBrand?: string | null;
+  /** @nullable */
+  driverVehicleModel?: string | null;
+  /** @nullable */
+  driverVehicleColor?: string | null;
+  /** @nullable */
+  driverVehiclePlate?: string | null;
   origin: string;
   destination: string;
   vehicleType: VehicleType;
