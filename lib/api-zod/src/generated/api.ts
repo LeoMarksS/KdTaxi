@@ -33,7 +33,7 @@ export const RequestRideResponse = zod.object({
   id: zod.string(),
   clientId: zod.string(),
   clientName: zod.string(),
-  clientPhone: zod.string(),
+  clientPhone: zod.string().optional(),
   clientPhoto: zod.string().nullish(),
   clientAvgRating: zod.number().nullish(),
   clientRideCount: zod.number().nullish(),
@@ -42,6 +42,10 @@ export const RequestRideResponse = zod.object({
   driverPhoto: zod.string().nullish(),
   driverAvgRating: zod.number().nullish(),
   driverRideCount: zod.number().nullish(),
+  driverVehicleBrand: zod.string().nullish(),
+  driverVehicleModel: zod.string().nullish(),
+  driverVehicleColor: zod.string().nullish(),
+  driverVehiclePlate: zod.string().nullish(),
   origin: zod.string(),
   destination: zod.string(),
   vehicleType: zod.enum(["car", "motorcycle"]),
@@ -78,6 +82,12 @@ export const LoginUserResponse = zod.object({
     vehicleType: zod
       .union([zod.enum(["car", "motorcycle"]), zod.null()])
       .optional(),
+    vehicleBrand: zod.string().nullish(),
+    vehicleModel: zod.string().nullish(),
+    vehicleColor: zod.string().nullish(),
+    vehiclePlate: zod.string().nullish(),
+    approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+    isOnline: zod.boolean().optional(),
     active: zod.boolean(),
     photo: zod.string().nullish(),
     rating: zod.number(),
@@ -125,6 +135,12 @@ export const ListUsersResponseItem = zod.object({
   vehicleType: zod
     .union([zod.enum(["car", "motorcycle"]), zod.null()])
     .optional(),
+  vehicleBrand: zod.string().nullish(),
+  vehicleModel: zod.string().nullish(),
+  vehicleColor: zod.string().nullish(),
+  vehiclePlate: zod.string().nullish(),
+  approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+  isOnline: zod.boolean().optional(),
   active: zod.boolean(),
   photo: zod.string().nullish(),
   rating: zod.number(),
@@ -140,7 +156,7 @@ export const ListRidesResponseItem = zod.object({
   id: zod.string(),
   clientId: zod.string(),
   clientName: zod.string(),
-  clientPhone: zod.string(),
+  clientPhone: zod.string().optional(),
   clientPhoto: zod.string().nullish(),
   clientAvgRating: zod.number().nullish(),
   clientRideCount: zod.number().nullish(),
@@ -149,6 +165,10 @@ export const ListRidesResponseItem = zod.object({
   driverPhoto: zod.string().nullish(),
   driverAvgRating: zod.number().nullish(),
   driverRideCount: zod.number().nullish(),
+  driverVehicleBrand: zod.string().nullish(),
+  driverVehicleModel: zod.string().nullish(),
+  driverVehicleColor: zod.string().nullish(),
+  driverVehiclePlate: zod.string().nullish(),
   origin: zod.string(),
   destination: zod.string(),
   vehicleType: zod.enum(["car", "motorcycle"]),
@@ -191,6 +211,12 @@ export const CreateAdminUserResponse = zod.object({
   vehicleType: zod
     .union([zod.enum(["car", "motorcycle"]), zod.null()])
     .optional(),
+  vehicleBrand: zod.string().nullish(),
+  vehicleModel: zod.string().nullish(),
+  vehicleColor: zod.string().nullish(),
+  vehiclePlate: zod.string().nullish(),
+  approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+  isOnline: zod.boolean().optional(),
   active: zod.boolean(),
   photo: zod.string().nullish(),
   rating: zod.number(),
@@ -224,6 +250,92 @@ export const UpdateAdminUserResponse = zod.object({
   vehicleType: zod
     .union([zod.enum(["car", "motorcycle"]), zod.null()])
     .optional(),
+  vehicleBrand: zod.string().nullish(),
+  vehicleModel: zod.string().nullish(),
+  vehicleColor: zod.string().nullish(),
+  vehiclePlate: zod.string().nullish(),
+  approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+  isOnline: zod.boolean().optional(),
+  active: zod.boolean(),
+  photo: zod.string().nullish(),
+  rating: zod.number(),
+  rideCount: zod.number(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Approve or reject a driver
+ */
+export const DecideDriverApprovalParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const DecideDriverApprovalBody = zod.object({
+  status: zod.enum(["pending", "approved", "rejected"]),
+});
+
+export const DecideDriverApprovalResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  phone: zod.string(),
+  mode: zod.enum(["client", "driver", "admin"]),
+  vehicleType: zod
+    .union([zod.enum(["car", "motorcycle"]), zod.null()])
+    .optional(),
+  vehicleBrand: zod.string().nullish(),
+  vehicleModel: zod.string().nullish(),
+  vehicleColor: zod.string().nullish(),
+  vehiclePlate: zod.string().nullish(),
+  approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+  isOnline: zod.boolean().optional(),
+  active: zod.boolean(),
+  photo: zod.string().nullish(),
+  rating: zod.number(),
+  rideCount: zod.number(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Update vehicle and return driver to pending approval
+ */
+export const UpdateDriverVehicleParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const updateDriverVehicleBodyVehicleBrandMax = 80;
+
+export const updateDriverVehicleBodyVehicleModelMax = 80;
+
+export const updateDriverVehicleBodyVehicleColorMax = 50;
+
+export const updateDriverVehicleBodyVehiclePlateMin = 7;
+export const updateDriverVehicleBodyVehiclePlateMax = 8;
+
+export const UpdateDriverVehicleBody = zod.object({
+  vehicleType: zod.enum(["car", "motorcycle"]),
+  vehicleBrand: zod.string().min(1).max(updateDriverVehicleBodyVehicleBrandMax),
+  vehicleModel: zod.string().min(1).max(updateDriverVehicleBodyVehicleModelMax),
+  vehicleColor: zod.string().min(1).max(updateDriverVehicleBodyVehicleColorMax),
+  vehiclePlate: zod
+    .string()
+    .min(updateDriverVehicleBodyVehiclePlateMin)
+    .max(updateDriverVehicleBodyVehiclePlateMax),
+});
+
+export const UpdateDriverVehicleResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  phone: zod.string(),
+  mode: zod.enum(["client", "driver", "admin"]),
+  vehicleType: zod
+    .union([zod.enum(["car", "motorcycle"]), zod.null()])
+    .optional(),
+  vehicleBrand: zod.string().nullish(),
+  vehicleModel: zod.string().nullish(),
+  vehicleColor: zod.string().nullish(),
+  vehiclePlate: zod.string().nullish(),
+  approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+  isOnline: zod.boolean().optional(),
   active: zod.boolean(),
   photo: zod.string().nullish(),
   rating: zod.number(),
