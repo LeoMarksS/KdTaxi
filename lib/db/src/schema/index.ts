@@ -22,6 +22,11 @@ export const users = pgTable("users", {
   passwordHash: text("password_hash").notNull(),
   mode: varchar("mode", { length: 20 }).notNull(),
   vehicleType: varchar("vehicle_type", { length: 20 }),
+  vehicleBrand: varchar("vehicle_brand", { length: 80 }),
+  vehicleModel: varchar("vehicle_model", { length: 80 }),
+  vehicleColor: varchar("vehicle_color", { length: 50 }),
+  vehiclePlate: varchar("vehicle_plate", { length: 10 }),
+  approvalStatus: varchar("approval_status", { length: 20 }).notNull().default("approved"),
   active: boolean("active").notNull().default(true),
   isOnline: boolean("is_online").notNull().default(false),
   photo: text("photo"),
@@ -35,6 +40,7 @@ export const users = pgTable("users", {
   check("users_ride_count_check", sql`${table.rideCount} >= 0`),
   check("users_mode_check", sql`${table.mode} in ('client', 'driver', 'admin')`),
   check("users_vehicle_check", sql`${table.vehicleType} is null or ${table.vehicleType} in ('car', 'motorcycle')`),
+  check("users_approval_check", sql`${table.approvalStatus} in ('pending', 'approved', 'rejected')`),
 ]);
 
 // Sessões de autenticação
@@ -66,6 +72,10 @@ export const rides = pgTable("rides", {
   driverPhoto: text("driver_photo"),
   driverAvgRating: doublePrecision("driver_avg_rating"),
   driverRideCount: integer("driver_ride_count"),
+  driverVehicleBrand: varchar("driver_vehicle_brand", { length: 80 }),
+  driverVehicleModel: varchar("driver_vehicle_model", { length: 80 }),
+  driverVehicleColor: varchar("driver_vehicle_color", { length: 50 }),
+  driverVehiclePlate: varchar("driver_vehicle_plate", { length: 10 }),
 
   origin: text("origin").notNull(),
   destination: text("destination").notNull(),
