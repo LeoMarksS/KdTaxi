@@ -188,6 +188,56 @@ paths:
                 $ref: "#/components/schemas/User"
         "403":
           description: Admin account required
+  /admin/drivers/{id}/approval:
+    post:
+      operationId: decideDriverApproval
+      tags: [admin, users]
+      summary: Approve or reject a driver
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverApprovalDecision"
+      responses:
+        "200":
+          description: Updated driver
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+  /users/{id}/vehicle:
+    put:
+      operationId: updateDriverVehicle
+      tags: [users]
+      summary: Update vehicle and return driver to pending approval
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriverVehicleDetails"
+      responses:
+        "200":
+          description: Updated driver
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
         "404":
           description: User not found
     delete:
@@ -314,6 +364,14 @@ components:
           oneOf:
             - $ref: "#/components/schemas/VehicleType"
             - type: "null"
+        vehicleBrand: { type: ["string", "null"] }
+        vehicleModel: { type: ["string", "null"] }
+        vehicleColor: { type: ["string", "null"] }
+        vehiclePlate: { type: ["string", "null"] }
+        approvalStatus:
+          type: string
+          enum: [pending, approved, rejected]
+        isOnline: { type: boolean }
         active:
           type: boolean
         photo:
@@ -325,7 +383,24 @@ components:
         createdAt:
           type: string
           format: date-time
-      required: [id, name, phone, mode, active, rating, rideCount, createdAt]
+      required: [id, name, phone, mode, active, approvalStatus, rating, rideCount, createdAt]
+    DriverVehicleDetails:
+      type: object
+      properties:
+        vehicleType:
+          $ref: "#/components/schemas/VehicleType"
+        vehicleBrand: { type: string, minLength: 1, maxLength: 80 }
+        vehicleModel: { type: string, minLength: 1, maxLength: 80 }
+        vehicleColor: { type: string, minLength: 1, maxLength: 50 }
+        vehiclePlate: { type: string, minLength: 7, maxLength: 8 }
+      required: [vehicleType, vehicleBrand, vehicleModel, vehicleColor, vehiclePlate]
+    DriverApprovalDecision:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+      required: [status]
     LoginInput:
       type: object
       properties:
@@ -474,6 +549,10 @@ components:
           type: ["number", "null"]
         driverRideCount:
           type: ["integer", "null"]
+        driverVehicleBrand: { type: ["string", "null"] }
+        driverVehicleModel: { type: ["string", "null"] }
+        driverVehicleColor: { type: ["string", "null"] }
+        driverVehiclePlate: { type: ["string", "null"] }
         origin:
           type: string
         destination:
@@ -505,7 +584,6 @@ components:
         - id
         - clientId
         - clientName
-        - clientPhone
         - origin
         - destination
         - vehicleType
