@@ -601,6 +601,13 @@ export default function ClientHome() {
                   <View style={{ flex: 1 }}>
                     <Text style={s.driverName}>{activeRide.driverName}</Text>
                     <Text style={s.driverSub}>Seu motorista</Text>
+                    {activeRide.driverVehicleModel && (
+                      <Text style={s.driverSub}>
+                        {[activeRide.driverVehicleBrand, activeRide.driverVehicleModel,
+                          activeRide.driverVehicleColor, activeRide.driverVehiclePlate]
+                          .filter(Boolean).join(" · ")}
+                      </Text>
+                    )}
                     {(activeRide.driverAvgRating ?? 0) > 0 ? (
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 }}>
                         <StarRating rating={activeRide.driverAvgRating!} size={13} />

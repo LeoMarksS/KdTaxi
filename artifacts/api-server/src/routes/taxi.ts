@@ -13,7 +13,8 @@ let socketServer: SocketIOServer | undefined;
 
 export function isDriverOnline(userId: string): boolean {
   const user = users.get(userId);
-  return user?.mode === "driver" && user.active && user.isOnline === true &&
+  return user?.mode === "driver" && user.active &&
+    user.approvalStatus === "approved" && user.isOnline === true &&
     Array.from(sessions.values()).some((session) =>
       session.userId === userId && session.expiresAt > Date.now());
 }
@@ -35,6 +36,11 @@ interface User {
   passwordHash: string;
   mode: "client" | "driver" | "admin";
   vehicleType?: "car" | "motorcycle";
+  vehicleBrand?: string;
+  vehicleModel?: string;
+  vehicleColor?: string;
+  vehiclePlate?: string;
+  approvalStatus: "pending" | "approved" | "rejected";
   active: boolean;
   isOnline: boolean;
   photo?: string;
@@ -57,6 +63,10 @@ interface Ride {
   driverPhoto?: string;
   driverAvgRating?: number;
   driverRideCount?: number;
+  driverVehicleBrand?: string;
+  driverVehicleModel?: string;
+  driverVehicleColor?: string;
+  driverVehiclePlate?: string;
   origin: string;
   destination: string;
   vehicleType: "car" | "motorcycle";
@@ -75,7 +85,33 @@ function driverVehicleType(user: User): "car" | "motorcycle" {
 }
 
 function driverCanTakeRide(user: User, ride: Ride): boolean {
-  return user.mode === "driver" && driverVehicleType(user) === ride.vehicleType;
+  return user.mode === "driver" && user.active &&
+    user.approvalStatus === "approved" &&
+    driverVehicleType(user) === ride.vehicleType;
+}
+
+function vehicleDetailsFromBody(body: Record<string, unknown>): {
+  vehicleType: "car" | "motorcycle";
+  vehicleBrand: string;
+  vehicleModel: string;
+  vehicleColor: string;
+  vehiclePlate: string;
+} | undefined {
+  const vehicleType = body.vehicleType;
+  if (vehicleType !== "car" && vehicleType !== "motorcycle") return undefined;
+  const vehicleBrand = typeof body.vehicleBrand === "string" ? body.vehicleBrand.trim() : "";
+  const vehicleModel = typeof body.vehicleModel === "string" ? body.vehicleModel.trim() : "";
+  const vehicleColor = typeof body.vehicleColor === "string" ? body.vehicleColor.trim() : "";
+  const vehiclePlate = typeof body.vehiclePlate === "string"
+    ? body.vehiclePlate.toUpperCase().replace(/[\s-]/g, "") : "";
+  if (!vehicleBrand || vehicleBrand.length > 80 || !vehicleModel || vehicleModel.length > 80 ||
+      !vehicleColor || vehicleColor.length > 50 ||
+      !/^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(vehiclePlate)) return undefined;
+  return { vehicleType, vehicleBrand, vehicleModel, vehicleColor, vehiclePlate };
+}
+
+function hasVehicleDetails(user: User): boolean {
+  return Boolean(user.vehicleBrand && user.vehicleModel && user.vehicleColor && user.vehiclePlate);
 }
 
 interface PriceRule {
@@ -125,6 +161,11 @@ function userFromRecord(record: typeof dbUsers.$inferSelect): User {
     mode: record.mode as User["mode"],
     vehicleType: record.vehicleType === "motorcycle" ? "motorcycle" :
       record.vehicleType === "car" ? "car" : undefined,
+    vehicleBrand: record.vehicleBrand ?? undefined,
+    vehicleModel: record.vehicleModel ?? undefined,
+    vehicleColor: record.vehicleColor ?? undefined,
+    vehiclePlate: record.vehiclePlate ?? undefined,
+    approvalStatus: record.approvalStatus as User["approvalStatus"],
     active: record.active,
     isOnline: record.isOnline,
     photo: record.photo ?? undefined,
@@ -149,6 +190,10 @@ function rideFromRecord(record: typeof dbRides.$inferSelect): Ride {
     driverPhoto: record.driverPhoto ?? undefined,
     driverAvgRating: record.driverAvgRating ?? undefined,
     driverRideCount: record.driverRideCount ?? undefined,
+    driverVehicleBrand: record.driverVehicleBrand ?? undefined,
+    driverVehicleModel: record.driverVehicleModel ?? undefined,
+    driverVehicleColor: record.driverVehicleColor ?? undefined,
+    driverVehiclePlate: record.driverVehiclePlate ?? undefined,
     origin: record.origin,
     destination: record.destination,
     vehicleType: record.vehicleType as Ride["vehicleType"],
@@ -547,6 +592,13 @@ router.post("/register", registerLimiter, async (req: Request, res: Response) =>
     res.status(400).json({ error: "Tipo de veículo inválido" });
     return;
   }
+  const hasSubmittedVehicleDetails = ["vehicleBrand", "vehicleModel", "vehicleColor", "vehiclePlate"]
+    .some((field) => req.body[field] !== undefined);
+  const vehicleDetails = mode === "driver" ? vehicleDetailsFromBody(req.body) : undefined;
+  if (hasSubmittedVehicleDetails && !vehicleDetails) {
+    res.status(400).json({ error: "Informe marca, modelo, cor e placa válidos" });
+    return;
+  }
 
   const normalizedPhone = phone.trim();
   const existing = Array.from(users.values()).find((u) => u.phone === normalizedPhone);
@@ -560,6 +612,8 @@ router.post("/register", registerLimiter, async (req: Request, res: Response) =>
     passwordHash: bcrypt.hashSync(password, 10),
     mode,
     vehicleType: mode === "driver" && vehicleType === "motorcycle" ? "motorcycle" : mode === "driver" ? "car" : undefined,
+    ...(vehicleDetails ?? {}),
+    approvalStatus: mode === "driver" ? "pending" : "approved",
     active: true, isOnline: false, rating: 0, rideCount: 0,
     photo, createdAt: new Date().toISOString(),
   };
@@ -571,6 +625,11 @@ router.post("/register", registerLimiter, async (req: Request, res: Response) =>
       passwordHash: user.passwordHash,
       mode: user.mode,
       vehicleType: user.vehicleType ?? null,
+      vehicleBrand: user.vehicleBrand ?? null,
+      vehicleModel: user.vehicleModel ?? null,
+      vehicleColor: user.vehicleColor ?? null,
+      vehiclePlate: user.vehiclePlate ?? null,
+      approvalStatus: user.approvalStatus,
       active: user.active,
       photo: user.photo ?? null,
       pushToken: user.pushToken ?? null,
@@ -816,6 +875,10 @@ router.post("/users/:id/availability", requireAuth, async (req: Request, res: Re
     res.status(403).json({ error: "Esta conta está desativada" });
     return;
   }
+  if (req.body.online === true && user.approvalStatus !== "approved") {
+    res.status(403).json({ error: "Aguarde a aprovação do motorista" });
+    return;
+  }
 
   try {
     const online = req.body.online === true;
@@ -825,6 +888,46 @@ router.post("/users/:id/availability", requireAuth, async (req: Request, res: Re
   } catch (error) {
     console.error("[availability] Erro ao salvar disponibilidade:", error);
     res.status(500).json({ error: "Não foi possível salvar a disponibilidade" });
+  }
+});
+
+// PUT /users/:id/vehicle – alterações aguardam nova aprovação.
+router.put("/users/:id/vehicle", requireAuth, async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const user = users.get(id);
+  if (!user || user.mode !== "driver") {
+    res.status(404).json({ error: "Motorista não encontrado" });
+    return;
+  }
+  if (req.authUser!.id !== id && req.authUser!.mode !== "admin") {
+    res.status(403).json({ error: "Acesso negado" });
+    return;
+  }
+  const details = vehicleDetailsFromBody(req.body);
+  if (!details) {
+    res.status(400).json({ error: "Informe categoria, marca, modelo, cor e placa válidos" });
+    return;
+  }
+  try {
+    const activeRide = await db.select({ id: dbRides.id }).from(dbRides)
+      .where(and(eq(dbRides.driverId, id),
+        inArray(dbRides.status, ["accepted", "in_progress"]))).limit(1);
+    if (activeRide.length) {
+      res.status(409).json({ error: "Finalize a corrida antes de alterar o veículo" });
+      return;
+    }
+    const changed = Object.entries(details).some(([key, value]) =>
+      user[key as keyof User] !== value);
+    if (changed) {
+      await db.update(dbUsers).set({
+        ...details, approvalStatus: "pending", isOnline: false,
+      }).where(eq(dbUsers.id, id));
+      Object.assign(user, details, { approvalStatus: "pending", isOnline: false });
+    }
+    res.json(safeUser(user));
+  } catch (error) {
+    console.error("[vehicle] Erro ao atualizar veículo:", error);
+    res.status(500).json({ error: "Não foi possível atualizar o veículo" });
   }
 });
 
@@ -849,6 +952,10 @@ router.post("/users/:id/active", requireAuth, async (req: Request, res: Response
     // APKs anteriores usam /active para o botão Online/Offline do motorista.
     // Mantenha a conta ativa e grave somente a disponibilidade.
     if (user.mode === "driver") {
+      if (active && user.approvalStatus !== "approved") {
+        res.status(403).json({ error: "Aguarde a aprovação do motorista" });
+        return;
+      }
       await db.update(dbUsers).set({ isOnline: active }).where(eq(dbUsers.id, id));
       user.isOnline = active;
       res.json(safeUser(user));
@@ -884,6 +991,34 @@ router.post("/users/:id/active", requireAuth, async (req: Request, res: Response
 });
 
 // ─── ADMIN ENDPOINTS ───────────────────────────────────────────────────────
+
+router.post("/admin/drivers/:id/approval", requireAdmin, async (req: Request, res: Response) => {
+  const id = req.params.id as string;
+  const user = users.get(id);
+  if (!user || user.mode !== "driver") {
+    res.status(404).json({ error: "Motorista não encontrado" });
+    return;
+  }
+  const status = req.body.status;
+  if (status !== "pending" && status !== "approved" && status !== "rejected") {
+    res.status(400).json({ error: "Decisão inválida" });
+    return;
+  }
+  if (status === "approved" && (!hasVehicleDetails(user) || !user.photo)) {
+    res.status(409).json({ error: "Antes de aprovar, confira foto, marca, modelo, cor e placa" });
+    return;
+  }
+  try {
+    await db.update(dbUsers).set({ approvalStatus: status, isOnline: false })
+      .where(eq(dbUsers.id, id));
+    user.approvalStatus = status;
+    user.isOnline = false;
+    res.json(safeUser(user));
+  } catch (error) {
+    console.error("[approval] Erro ao decidir aprovação:", error);
+    res.status(500).json({ error: "Não foi possível salvar a decisão" });
+  }
+});
 
 // PUT /admin/users/:id – admin can edit any user fully
 router.put("/admin/users/:id", requireAdmin, async (req: Request, res: Response) => {
@@ -924,6 +1059,10 @@ router.put("/admin/users/:id", requireAdmin, async (req: Request, res: Response)
   const updatedMode = (mode ?? user.mode) as User["mode"];
   const updatedVehicleType = (vehicleType ?? user.vehicleType) as User["vehicleType"];
   const updatedActive = active !== undefined ? active : user.active;
+  const vehicleChanged = updatedMode === "driver" &&
+    (user.mode !== "driver" || updatedVehicleType !== user.vehicleType);
+  const updatedApprovalStatus: User["approvalStatus"] = updatedMode !== "driver"
+    ? "approved" : vehicleChanged ? "pending" : user.approvalStatus;
   if (password !== undefined &&
       (typeof password !== "string" || password.length < 8 || password.length > 128)) {
     res.status(400).json({ error: "A nova senha deve ter entre 8 e 128 caracteres." });
@@ -957,7 +1096,8 @@ router.put("/admin/users/:id", requireAdmin, async (req: Request, res: Response)
         mode: updatedMode,
         vehicleType: updatedVehicleType ?? null,
         active: updatedActive,
-        isOnline: updatedMode === "driver" && updatedActive ? user.isOnline : false,
+        isOnline: updatedMode === "driver" && updatedActive && !vehicleChanged ? user.isOnline : false,
+        approvalStatus: updatedApprovalStatus,
         passwordHash: updatedPasswordHash,
       })
       .where(eq(dbUsers.id, id));
@@ -967,7 +1107,8 @@ router.put("/admin/users/:id", requireAdmin, async (req: Request, res: Response)
     user.mode = updatedMode;
     if (vehicleType !== undefined) user.vehicleType = updatedVehicleType;
     user.active = updatedActive;
-    if (updatedMode !== "driver" || !updatedActive) user.isOnline = false;
+    user.approvalStatus = updatedApprovalStatus;
+    if (updatedMode !== "driver" || !updatedActive || vehicleChanged) user.isOnline = false;
     user.passwordHash = updatedPasswordHash;
 
     if (!updatedActive) {
@@ -1134,8 +1275,9 @@ router.post("/admin/users", requireAdmin, async (req: Request, res: Response) =>
     ...(resolvedMode === "driver"
       ? { vehicleType: (vehicleType as User["vehicleType"]) ?? "car" }
       : {}),
-    active: resolvedMode !== "driver",
+    active: true,
     isOnline: false,
+    approvalStatus: resolvedMode === "driver" ? "pending" : "approved",
     rating: 0,
     rideCount: 0,
     createdAt: new Date().toISOString(),
@@ -1149,6 +1291,7 @@ router.post("/admin/users", requireAdmin, async (req: Request, res: Response) =>
       passwordHash: user.passwordHash,
       mode: user.mode,
       vehicleType: user.vehicleType ?? null,
+      approvalStatus: user.approvalStatus,
       active: user.active,
       photo: null,
       pushToken: null,
@@ -1291,6 +1434,10 @@ router.post("/accept-ride", requireAuth, async (req: Request, res: Response) => 
     res.status(403).json({ error: "Acesso negado" });
     return;
   }
+  if (driver.approvalStatus !== "approved") {
+    res.status(403).json({ error: "Motorista aguardando aprovação" });
+    return;
+  }
 
   const ride = rides.get(rideId);
   if (!ride) { res.status(404).json({ error: "Ride not found" }); return; }
@@ -1314,6 +1461,10 @@ router.post("/accept-ride", requireAuth, async (req: Request, res: Response) => 
         driverPhoto: driver.photo ?? null,
         driverAvgRating: driver.rating,
         driverRideCount: driver.rideCount,
+        driverVehicleBrand: driver.vehicleBrand ?? null,
+        driverVehicleModel: driver.vehicleModel ?? null,
+        driverVehicleColor: driver.vehicleColor ?? null,
+        driverVehiclePlate: driver.vehiclePlate ?? null,
         status: "accepted",
         acceptedAt,
       })
@@ -1347,6 +1498,10 @@ router.post("/accept-ride", requireAuth, async (req: Request, res: Response) => 
   ride.driverPhoto = driver.photo;
   ride.driverAvgRating = driver.rating;
   ride.driverRideCount = driver.rideCount;
+  ride.driverVehicleBrand = driver.vehicleBrand;
+  ride.driverVehicleModel = driver.vehicleModel;
+  ride.driverVehicleColor = driver.vehicleColor;
+  ride.driverVehiclePlate = driver.vehiclePlate;
   ride.status = "accepted";
   ride.acceptedAt = acceptedAt.toISOString();
 

@@ -41,18 +41,74 @@ export const RideStatus = {
   cancelled: "cancelled",
 } as const;
 
+export type UserApprovalStatus =
+  (typeof UserApprovalStatus)[keyof typeof UserApprovalStatus];
+
+export const UserApprovalStatus = {
+  pending: "pending",
+  approved: "approved",
+  rejected: "rejected",
+} as const;
+
 export interface User {
   id: string;
   name: string;
   phone: string;
   mode: UserMode;
   vehicleType?: VehicleType | null;
+  /** @nullable */
+  vehicleBrand?: string | null;
+  /** @nullable */
+  vehicleModel?: string | null;
+  /** @nullable */
+  vehicleColor?: string | null;
+  /** @nullable */
+  vehiclePlate?: string | null;
+  approvalStatus: UserApprovalStatus;
+  isOnline?: boolean;
   active: boolean;
   /** @nullable */
   photo?: string | null;
   rating: number;
   rideCount: number;
   createdAt: string;
+}
+
+export interface DriverVehicleDetails {
+  vehicleType: VehicleType;
+  /**
+   * @minLength 1
+   * @maxLength 80
+   */
+  vehicleBrand: string;
+  /**
+   * @minLength 1
+   * @maxLength 80
+   */
+  vehicleModel: string;
+  /**
+   * @minLength 1
+   * @maxLength 50
+   */
+  vehicleColor: string;
+  /**
+   * @minLength 7
+   * @maxLength 8
+   */
+  vehiclePlate: string;
+}
+
+export type DriverApprovalDecisionStatus =
+  (typeof DriverApprovalDecisionStatus)[keyof typeof DriverApprovalDecisionStatus];
+
+export const DriverApprovalDecisionStatus = {
+  pending: "pending",
+  approved: "approved",
+  rejected: "rejected",
+} as const;
+
+export interface DriverApprovalDecision {
+  status: DriverApprovalDecisionStatus;
 }
 
 export interface LoginInput {
@@ -144,7 +200,7 @@ export interface Ride {
   id: string;
   clientId: string;
   clientName: string;
-  clientPhone: string;
+  clientPhone?: string;
   /** @nullable */
   clientPhoto?: string | null;
   /** @nullable */
@@ -161,6 +217,14 @@ export interface Ride {
   driverAvgRating?: number | null;
   /** @nullable */
   driverRideCount?: number | null;
+  /** @nullable */
+  driverVehicleBrand?: string | null;
+  /** @nullable */
+  driverVehicleModel?: string | null;
+  /** @nullable */
+  driverVehicleColor?: string | null;
+  /** @nullable */
+  driverVehiclePlate?: string | null;
   origin: string;
   destination: string;
   vehicleType: VehicleType;

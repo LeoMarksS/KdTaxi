@@ -1,5 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import React, {
   createContext,
   useCallback,
@@ -20,6 +20,11 @@ export interface User {
   phone: string;
   mode: UserMode;
   vehicleType?: VehicleType;
+  vehicleBrand?: string;
+  vehicleModel?: string;
+  vehicleColor?: string;
+  vehiclePlate?: string;
+  approvalStatus?: "pending" | "approved" | "rejected";
   photo?: string;
   rating?: number;
   rideCount?: number;
@@ -35,6 +40,7 @@ function getPersistedUser(user: User): User {
     mode: user.mode,
   };
   if (user.vehicleType) compactUser.vehicleType = user.vehicleType;
+  if (user.approvalStatus) compactUser.approvalStatus = user.approvalStatus;
   if (user.photo && user.photo.length <= MAX_CACHED_USER_PHOTO_CHARS) {
     compactUser.photo = user.photo;
   }
@@ -45,12 +51,19 @@ function getPersistedUser(user: User): User {
 
 export type RideStatus = "waiting" | "accepted" | "in_progress" | "finished" | "cancelled";
 export type VehicleType = "car" | "motorcycle";
+export interface DriverVehicleDetails {
+  vehicleType: VehicleType;
+  vehicleBrand: string;
+  vehicleModel: string;
+  vehicleColor: string;
+  vehiclePlate: string;
+}
 
 export interface Ride {
   id: string;
   clientId: string;
   clientName: string;
-  clientPhone: string;
+  clientPhone?: string;
   clientPhoto?: string;
   clientAvgRating?: number;
   clientRideCount?: number;
@@ -59,6 +72,10 @@ export interface Ride {
   driverPhoto?: string;
   driverAvgRating?: number;
   driverRideCount?: number;
+  driverVehicleBrand?: string;
+  driverVehicleModel?: string;
+  driverVehicleColor?: string;
+  driverVehiclePlate?: string;
   origin: string;
   destination: string;
   vehicleType?: VehicleType;
@@ -111,6 +128,7 @@ interface AppContextValue {
   user: User | null;
   setUser: (user: User | null) => void;
   updateProfile: (name: string, photo?: string) => Promise<void>;
+  updateDriverVehicle: (details: DriverVehicleDetails) => Promise<{ ok: boolean; error?: string }>;
   isDriverOnline: boolean;
   setDriverOnline: (online: boolean) => void;
   // Clients use activeRide (single); drivers use activeRides (multiple)
@@ -163,6 +181,7 @@ interface AppContextValue {
     mode: "client" | "driver",
     photo?: string,
     vehicleType?: VehicleType,
+    vehicleDetails?: Omit<DriverVehicleDetails, "vehicleType">,
   ) => Promise<{ ok: boolean; error?: string }>;
 }
 
@@ -303,33 +322,49 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Keep large profile photos in memory, not in AsyncStorage. Rehydrate them
-  // from the authenticated profile endpoint after login or app restart.
+  // Refresh approval and profile details on login and when the app returns.
+  // Keep large photos in memory rather than AsyncStorage.
   useEffect(() => {
     const userId = user?.id;
     if (!userId || !token) return;
     let cancelled = false;
-    void authFetch(`/users/${userId}`)
-      .then(async (response) => {
-        if (!response.ok || cancelled) return;
-        const refreshedUser = await response.json() as User;
-        if (!cancelled) setUser(refreshedUser);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
+    const refreshUser = () => {
+      void authFetch(`/users/${userId}`)
+        .then(async (response) => {
+          if (!response.ok || cancelled) return;
+          const refreshedUser = await response.json() as User;
+          if (!cancelled) setUser(refreshedUser);
+        })
+        .catch(() => {});
+    };
+    refreshUser();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") refreshUser();
+    });
+    return () => { cancelled = true; subscription.remove(); };
   }, [user?.id, token, authFetch, setUser]);
 
   const setDriverOnline = useCallback((online: boolean) => {
+    if (online && userRef.current?.approvalStatus &&
+        userRef.current.approvalStatus !== "approved") return;
     setDriverOnlineState(online);
     AsyncStorage.setItem("kd_driver_online", online ? "true" : "false");
     // Sync online/offline status to server so admin dashboard reflects reality
     const uid = userRef.current?.id;
     if (uid) {
-      authFetch(`/users/${uid}/active`, {
+      authFetch(`/users/${uid}/availability`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ active: online }),
-      }).catch(() => {});
+        body: JSON.stringify({ online }),
+      }).then((res) => {
+        if (!res.ok) {
+          setDriverOnlineState(false);
+          void AsyncStorage.setItem("kd_driver_online", "false");
+        }
+      }).catch(() => {
+        setDriverOnlineState(false);
+        void AsyncStorage.setItem("kd_driver_online", "false");
+      });
     }
     if (online) {
       authFetch(`/rides`)
@@ -349,6 +384,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         .catch(() => {});
     }
   }, [authFetch]);
+
+  const updateDriverVehicle = useCallback(async (details: DriverVehicleDetails) => {
+    const uid = userRef.current?.id;
+    if (!uid) return { ok: false, error: "Entre na sua conta novamente." };
+    try {
+      const res = await authFetch(`/users/${uid}/vehicle`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(details),
+      });
+      const data = await res.json();
+      if (!res.ok) return { ok: false, error: data.error ?? "Não foi possível salvar o veículo." };
+      setUser(data as User);
+      setDriverOnlineState(false);
+      void AsyncStorage.setItem("kd_driver_online", "false");
+      return { ok: true };
+    } catch {
+      return { ok: false, error: "Sem conexão com o servidor." };
+    }
+  }, [authFetch, setUser]);
 
   const updateProfile = useCallback(async (name: string, photo?: string) => {
     if (!user) return;
@@ -387,12 +441,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     mode: "client" | "driver",
     photo?: string,
     vehicleType?: VehicleType,
+    vehicleDetails?: Omit<DriverVehicleDetails, "vehicleType">,
   ): Promise<{ ok: boolean; error?: string }> => {
     try {
       const res = await fetch(`${API_BASE}/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, phone, password, mode, photo, vehicleType }),
+        body: JSON.stringify({ name, phone, password, mode, photo, vehicleType, ...vehicleDetails }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) return { ok: false, error: data.error ?? "Erro ao criar conta." };
@@ -826,7 +881,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   return (
     <AppContext.Provider value={{
       isAuthLoading,
-      user, setUser, updateProfile,
+      user, setUser, updateProfile, updateDriverVehicle,
       isDriverOnline, setDriverOnline,
       activeRide, setActiveRide, activeRides,
       pendingRides, chatMessagesByRide, sendChatMessage,

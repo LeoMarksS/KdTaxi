@@ -20,6 +20,8 @@ import type {
   AdminStats,
   AdminUserInput,
   AdminUserUpdate,
+  DriverApprovalDecision,
+  DriverVehicleDetails,
   HealthStatus,
   LoginInput,
   LoginResponse,
@@ -746,10 +748,184 @@ export const useUpdateAdminUser = <
 };
 
 /**
+ * @summary Approve or reject a driver
+ */
+export const getDecideDriverApprovalUrl = (id: string) => {
+  return `/api/admin/drivers/${id}/approval`;
+};
+
+export const decideDriverApproval = async (
+  id: string,
+  driverApprovalDecision: DriverApprovalDecision,
+  options?: RequestInit,
+): Promise<User> => {
+  return customFetch<User>(getDecideDriverApprovalUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(driverApprovalDecision),
+  });
+};
+
+export const getDecideDriverApprovalMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof decideDriverApproval>>,
+    TError,
+    { id: string; data: BodyType<DriverApprovalDecision> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof decideDriverApproval>>,
+  TError,
+  { id: string; data: BodyType<DriverApprovalDecision> },
+  TContext
+> => {
+  const mutationKey = ["decideDriverApproval"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof decideDriverApproval>>,
+    { id: string; data: BodyType<DriverApprovalDecision> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return decideDriverApproval(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DecideDriverApprovalMutationResult = NonNullable<
+  Awaited<ReturnType<typeof decideDriverApproval>>
+>;
+export type DecideDriverApprovalMutationBody = BodyType<DriverApprovalDecision>;
+export type DecideDriverApprovalMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Approve or reject a driver
+ */
+export const useDecideDriverApproval = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof decideDriverApproval>>,
+    TError,
+    { id: string; data: BodyType<DriverApprovalDecision> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof decideDriverApproval>>,
+  TError,
+  { id: string; data: BodyType<DriverApprovalDecision> },
+  TContext
+> => {
+  return useMutation(getDecideDriverApprovalMutationOptions(options));
+};
+
+/**
+ * @summary Update vehicle and return driver to pending approval
+ */
+export const getUpdateDriverVehicleUrl = (id: string) => {
+  return `/api/users/${id}/vehicle`;
+};
+
+export const updateDriverVehicle = async (
+  id: string,
+  driverVehicleDetails: DriverVehicleDetails,
+  options?: RequestInit,
+): Promise<User> => {
+  return customFetch<User>(getUpdateDriverVehicleUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(driverVehicleDetails),
+  });
+};
+
+export const getUpdateDriverVehicleMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateDriverVehicle>>,
+    TError,
+    { id: string; data: BodyType<DriverVehicleDetails> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateDriverVehicle>>,
+  TError,
+  { id: string; data: BodyType<DriverVehicleDetails> },
+  TContext
+> => {
+  const mutationKey = ["updateDriverVehicle"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateDriverVehicle>>,
+    { id: string; data: BodyType<DriverVehicleDetails> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateDriverVehicle(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateDriverVehicleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateDriverVehicle>>
+>;
+export type UpdateDriverVehicleMutationBody = BodyType<DriverVehicleDetails>;
+export type UpdateDriverVehicleMutationError = ErrorType<void>;
+
+/**
+ * @summary Update vehicle and return driver to pending approval
+ */
+export const useUpdateDriverVehicle = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateDriverVehicle>>,
+    TError,
+    { id: string; data: BodyType<DriverVehicleDetails> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateDriverVehicle>>,
+  TError,
+  { id: string; data: BodyType<DriverVehicleDetails> },
+  TContext
+> => {
+  return useMutation(getUpdateDriverVehicleMutationOptions(options));
+};
+
+/**
  * @summary Delete a non-admin user account
  */
 export const getDeleteAdminUserUrl = (id: string) => {
-  return `/api/admin/users/${id}`;
+  return `/api/users/${id}/vehicle`;
 };
 
 export const deleteAdminUser = async (

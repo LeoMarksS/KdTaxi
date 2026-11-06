@@ -9,6 +9,9 @@
 export * from "./adminStats";
 export * from "./adminUserInput";
 export * from "./adminUserUpdate";
+export * from "./driverApprovalDecision";
+export * from "./driverApprovalDecisionStatus";
+export * from "./driverVehicleDetails";
 export * from "./healthStatus";
 export * from "./loginInput";
 export * from "./loginResponse";
@@ -21,5 +24,6 @@ export * from "./requestRidePayment";
 export * from "./ride";
 export * from "./rideStatus";
 export * from "./user";
+export * from "./userApprovalStatus";
 export * from "./userMode";
 export * from "./vehicleType";

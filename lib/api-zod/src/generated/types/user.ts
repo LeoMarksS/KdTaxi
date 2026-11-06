@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { UserApprovalStatus } from "./userApprovalStatus";
 import type { UserMode } from "./userMode";
 import type { VehicleType } from "./vehicleType";
 
@@ -14,6 +15,16 @@ export interface User {
   phone: string;
   mode: UserMode;
   vehicleType?: VehicleType | null;
+  /** @nullable */
+  vehicleBrand?: string | null;
+  /** @nullable */
+  vehicleModel?: string | null;
+  /** @nullable */
+  vehicleColor?: string | null;
+  /** @nullable */
+  vehiclePlate?: string | null;
+  approvalStatus: UserApprovalStatus;
+  isOnline?: boolean;
   active: boolean;
   /** @nullable */
   photo?: string | null;

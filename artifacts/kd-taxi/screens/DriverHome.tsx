@@ -542,7 +542,19 @@ export default function DriverHome() {
           </View>
         </View>
 
-        <TouchableOpacity onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setDriverOnline(!isDriverOnline); }}>
+        {user?.approvalStatus && user.approvalStatus !== "approved" && (
+          <TouchableOpacity onPress={() => router.push("/profile" as any)}
+            style={{ backgroundColor: colors.statusWaiting + "22", padding: 14, borderRadius: 12, marginBottom: 12 }}>
+            <Text style={{ color: colors.foreground, fontFamily: "Inter_600SemiBold" }}>
+              {user.approvalStatus === "rejected" ? "Cadastro precisa de correção" : "Cadastro em análise"}
+            </Text>
+            <Text style={{ color: colors.mutedForeground, marginTop: 4 }}>
+              Confira foto e veículo no perfil. Você receberá corridas após a aprovação.
+            </Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity disabled={Boolean(user?.approvalStatus && user.approvalStatus !== "approved")}
+          onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); setDriverOnline(!isDriverOnline); }}>
           <Animated.View style={[s.statusToggle, toggleStyle]}>
             <View style={s.toggleIcon}>
               <MaterialCommunityIcons name={isDriverOnline ? "car" : "car-off"} size={24} color="#fff" />
