@@ -31,6 +31,10 @@ export default function LoginScreen() {
   const [photo, setPhoto] = useState<string | undefined>();
   const [registerMode, setRegisterMode] = useState<RegisterMode>("client");
   const [driverVehicleType, setDriverVehicleType] = useState<VehicleType>("car");
+  const [vehicleBrand, setVehicleBrand] = useState("");
+  const [vehicleModel, setVehicleModel] = useState("");
+  const [vehicleColor, setVehicleColor] = useState("");
+  const [vehiclePlate, setVehiclePlate] = useState("");
 
   const registerModes: { id: RegisterMode; label: string; icon: string; desc: string }[] = [
     { id: "client", label: "Cliente", icon: "account", desc: "Solicitar táxi" },
@@ -76,6 +80,13 @@ export default function LoginScreen() {
   const handleRegister = async () => {
     if (!name.trim() || !phone.trim() || !password) { setError("Preencha nome, telefone e senha"); return; }
     if (password.length < 8 || password.length > 128) { setError("A senha deve ter entre 8 e 128 caracteres"); return; }
+    if (registerMode === "driver") {
+      if (!photo || !vehicleBrand.trim() || !vehicleModel.trim() || !vehicleColor.trim() ||
+          !/^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(vehiclePlate.toUpperCase().replace(/[\s-]/g, ""))) {
+        setError("Para cadastrar motorista, informe foto, marca, modelo, cor e placa válida.");
+        return;
+      }
+    }
     setLoading(true);
     setError("");
     const result = await register(
@@ -85,6 +96,10 @@ export default function LoginScreen() {
       registerMode,
       photo,
       registerMode === "driver" ? driverVehicleType : undefined,
+      registerMode === "driver" ? {
+        vehicleBrand: vehicleBrand.trim(), vehicleModel: vehicleModel.trim(),
+        vehicleColor: vehicleColor.trim(), vehiclePlate: vehiclePlate.trim(),
+      } : undefined,
     );
     setLoading(false);
     if (result.ok) {
@@ -174,7 +189,7 @@ export default function LoginScreen() {
                   <TouchableOpacity style={s.photoBtn} onPress={pickPhoto}>
                     {photo ? <UserAvatar name={name || "?"} photo={photo} size={76} /> : <Feather name="camera" size={26} color={colors.mutedForeground} />}
                   </TouchableOpacity>
-                  <Text style={s.photoHint}>{photo ? "Toque para trocar" : "Adicionar foto (opcional)"}</Text>
+                  <Text style={s.photoHint}>{photo ? "Toque para trocar" : registerMode === "driver" ? "Foto obrigatória para motorista" : "Adicionar foto (opcional)"}</Text>
                 </View>
                 <Text style={s.label}>Nome</Text>
                 <TextInput style={s.input} value={name} onChangeText={setName} placeholder="Seu nome completo" placeholderTextColor={colors.mutedForeground} autoCapitalize="words" />
@@ -212,6 +227,14 @@ export default function LoginScreen() {
                         );
                       })}
                     </View>
+                    <Text style={s.label}>Marca</Text>
+                    <TextInput style={s.input} value={vehicleBrand} onChangeText={setVehicleBrand} placeholder="Ex.: Chevrolet" placeholderTextColor={colors.mutedForeground} maxLength={80} />
+                    <Text style={s.label}>Modelo</Text>
+                    <TextInput style={s.input} value={vehicleModel} onChangeText={setVehicleModel} placeholder="Ex.: Onix" placeholderTextColor={colors.mutedForeground} maxLength={80} />
+                    <Text style={s.label}>Cor</Text>
+                    <TextInput style={s.input} value={vehicleColor} onChangeText={setVehicleColor} placeholder="Ex.: Branco" placeholderTextColor={colors.mutedForeground} maxLength={50} />
+                    <Text style={s.label}>Placa</Text>
+                    <TextInput style={s.input} value={vehiclePlate} onChangeText={setVehiclePlate} placeholder="ABC1D23" placeholderTextColor={colors.mutedForeground} autoCapitalize="characters" maxLength={8} />
                   </View>
                 )}
                 {!!error && <Text style={s.error}>{error}</Text>}
