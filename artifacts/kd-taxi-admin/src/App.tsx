@@ -23,6 +23,20 @@ setAuthTokenGetter(() => localStorage.getItem(TOKEN_KEY));
 
 type PageName = 'overview' | 'users' | 'rides' | 'pricing';
 type ToastState = { message: string; kind?: 'error' | 'success' } | null;
+type DriverUser = User & {
+  vehicleBrand?: string; vehicleModel?: string; vehicleColor?: string; vehiclePlate?: string;
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+};
+const apiBase = import.meta.env.VITE_API_URL || 'https://kdtaxi-api.onrender.com/api';
+async function adminRequest(path: string, method: string, body: object): Promise<DriverUser> {
+  const response = await fetch(`${apiBase}${path}`, {
+    method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem(TOKEN_KEY) ?? ''}` },
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Não foi possível salvar.');
+  return data as DriverUser;
+}
 
 const isAuthError = (error: unknown) => Boolean(error && typeof error === 'object' && 'status' in error && ((error as { status: number }).status === 401 || (error as { status: number }).status === 403));
 const raiseAuthExpired = () => window.dispatchEvent(new Event('kd-taxi-auth-expired'));
@@ -160,8 +174,11 @@ function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'er
   const [creating, setCreating] = useState(false);
   const [createMode, setCreateMode] = useState<'client' | 'driver'>('client');
   const [removing, setRemoving] = useState<User | null>(null);
+  const [reviewing, setReviewing] = useState<DriverUser | null>(null);
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [reviewError, setReviewError] = useState('');
   const [formError, setFormError] = useState('');
-  const users = query.data ?? [];
+  const users = (query.data ?? []) as DriverUser[];
   const filtered = useMemo(() => users.filter((user) => (filter === 'all' || user.mode === filter) && `${user.name} ${user.phone}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => a.name.localeCompare(b.name)), [users, filter, search]);
   const countByMode = (mode: string) => users.filter((user) => user.mode === mode).length;
   const saveUser = (event: FormEvent<HTMLFormElement>) => {
@@ -187,6 +204,37 @@ function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'er
     if (!removing) return;
     deleteUser.mutate({ id: removing.id }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() }); void queryClient.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() }); notify('Conta excluída.'); setRemoving(null); }, onError: (error) => { if (isAuthError(error)) { raiseAuthExpired(); return; } notify('Não foi possível excluir esta conta.', 'error'); } });
   };
+  const saveDriverVehicle = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!reviewing) return;
+    const form = new FormData(event.currentTarget);
+    setReviewSaving(true); setReviewError('');
+    try {
+      const updated = await adminRequest(`/users/${reviewing.id}/vehicle`, 'PUT', {
+        vehicleType: String(form.get('vehicleType') ?? 'car'),
+        vehicleBrand: String(form.get('vehicleBrand') ?? '').trim(),
+        vehicleModel: String(form.get('vehicleModel') ?? '').trim(),
+        vehicleColor: String(form.get('vehicleColor') ?? '').trim(),
+        vehiclePlate: String(form.get('vehiclePlate') ?? '').trim(),
+      });
+      setReviewing(updated);
+      void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
+      notify('Veículo salvo. Aguarda aprovação.');
+    } catch (error) { setReviewError(error instanceof Error ? error.message : 'Falha ao salvar veículo.'); }
+    finally { setReviewSaving(false); }
+  };
+  const decideDriver = async (status: 'approved' | 'rejected') => {
+    if (!reviewing) return;
+    setReviewSaving(true); setReviewError('');
+    try {
+      const updated = await adminRequest(`/admin/drivers/${reviewing.id}/approval`, 'POST', { status });
+      setReviewing(updated);
+      void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
+      void queryClient.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() });
+      notify(status === 'approved' ? 'Motorista aprovado.' : 'Cadastro devolvido para correção.');
+    } catch (error) { setReviewError(error instanceof Error ? error.message : 'Falha ao salvar decisão.'); }
+    finally { setReviewSaving(false); }
+  };
   const modalUser = editing ?? undefined;
   return <main className="page-enter">
      <div className="page-heading"><div><div className="eyebrow">CADASTROS · {users.length.toLocaleString('pt-BR')} CONTAS</div><h1>Usuários</h1><p>Gerencie os perfis que fazem a operação acontecer.</p></div><Button onClick={() => { setFormError(''); setCreateMode('client'); setCreating(true); }} testId="button-add-user"><Plus size={16} /> Novo usuário</Button></div>
@@ -199,10 +247,16 @@ function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'er
         <div className="table-wrap"><table><thead><tr><th>Perfil</th><th>Tipo</th><th>Corridas</th><th>Avaliação</th><th>Cadastro</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>
           {filtered.map((user) => <tr key={user.id} data-testid={`row-user-${user.id}`}>
             <td><div className="person-cell"><span className="avatar">{user.photo ? <img src={user.photo} alt="" /> : initials(user.name)}</span><div><strong data-testid={`text-user-name-${user.id}`}>{user.name}</strong><small className="mono">{user.phone}</small></div></div></td>
-            <td><span className={`role-pill role-${user.mode}`}>{user.mode === 'driver' ? user.vehicleType === 'motorcycle' ? <Bike size={13} /> : <CarFront size={13} /> : <UserRound size={13} />}{roleName(user.mode)}</span></td>
+            <td><span className={`role-pill role-${user.mode}`}>{user.mode === 'driver' ? user.vehicleType === 'motorcycle' ? <Bike size={13} /> : <CarFront size={13} /> : <UserRound size={13} />}{roleName(user.mode)}</span>
+              {user.mode === 'driver' && <small style={{ display: 'block', marginTop: 4 }}>
+                {user.approvalStatus === 'pending' ? 'Aguardando aprovação' : user.approvalStatus === 'rejected' ? 'Correção solicitada' : 'Aprovado'}
+              </small>}
+            </td>
             <td className="mono numeric">{user.rideCount.toLocaleString('pt-BR')}</td><td><span className="rating-cell"><Star size={13} />{user.rating.toFixed(1)}</span></td>
             <td className="date-cell">{formatDate(user.createdAt)}</td>
-            <td><div className="row-actions"><IconButton label={`Editar ${user.name}`} onClick={() => { setFormError(''); setEditing(user); }} testId={`button-edit-user-${user.id}`}><Settings2 size={16} /></IconButton>
+            <td><div className="row-actions">{user.mode === 'driver' &&
+              <IconButton label={`Revisar motorista ${user.name}`} onClick={() => { setReviewError(''); setReviewing(user); }} testId={`button-review-driver-${user.id}`}><ShieldCheck size={16} /></IconButton>}
+              <IconButton label={`Editar ${user.name}`} onClick={() => { setFormError(''); setEditing(user); }} testId={`button-edit-user-${user.id}`}><Settings2 size={16} /></IconButton>
               <IconButton label={`Excluir ${user.name}`} onClick={() => setRemoving(user)} testId={`button-delete-user-${user.id}`}><Trash2 size={16} /></IconButton></div></td>
           </tr>)}
         </tbody></table></div>}
@@ -219,6 +273,25 @@ function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'er
         {formError && <div className="form-alert" role="alert">{formError}</div>}
         <div className="dialog-actions"><Button variant="secondary" onClick={() => { setCreating(false); setEditing(null); }} testId="button-cancel-user">Cancelar</Button><Button type="submit" disabled={createUser.isPending || updateUser.isPending} testId="button-save-user">{createUser.isPending || updateUser.isPending ? 'Salvando…' : editing ? 'Salvar alterações' : 'Criar usuário'}</Button></div>
       </form>
+    </Dialog>}
+    {reviewing && <Dialog title={`Revisar ${reviewing.name}`} subtitle="Confira a foto e os dados do veículo antes de aprovar." onClose={() => setReviewing(null)}>
+      <div className="person-cell" style={{ marginBottom: 16 }}>
+        <span className="avatar">{reviewing.photo ? <img src={reviewing.photo} alt="Foto do motorista" /> : initials(reviewing.name)}</span>
+        <div><strong>{reviewing.name}</strong><small>{reviewing.photo ? 'Foto cadastrada' : 'Foto pendente'}</small></div>
+      </div>
+      <form className="form-stack" onSubmit={saveDriverVehicle} key={`${reviewing.id}-${reviewing.vehiclePlate ?? ''}`}>
+        <label>Categoria<select name="vehicleType" defaultValue={reviewing.vehicleType ?? 'car'}><option value="car">Carro</option><option value="motorcycle">Moto</option></select></label>
+        <label>Marca<input name="vehicleBrand" defaultValue={reviewing.vehicleBrand ?? ''} maxLength={80} required /></label>
+        <label>Modelo<input name="vehicleModel" defaultValue={reviewing.vehicleModel ?? ''} maxLength={80} required /></label>
+        <label>Cor<input name="vehicleColor" defaultValue={reviewing.vehicleColor ?? ''} maxLength={50} required /></label>
+        <label>Placa<input name="vehiclePlate" defaultValue={reviewing.vehiclePlate ?? ''} maxLength={8} required /></label>
+        {reviewError && <div className="form-alert" role="alert">{reviewError}</div>}
+        <div className="dialog-actions"><Button type="submit" disabled={reviewSaving} testId="button-save-driver-vehicle">Salvar veículo</Button></div>
+      </form>
+      <div className="dialog-actions">
+        <Button onClick={() => void decideDriver('approved')} disabled={reviewSaving || !reviewing.photo || !reviewing.vehiclePlate} testId="button-approve-driver">Aprovar motorista</Button>
+        <Button variant="danger" onClick={() => void decideDriver('rejected')} disabled={reviewSaving} testId="button-reject-driver">Solicitar correção</Button>
+      </div>
     </Dialog>}
     {removing && <Dialog title="Excluir usuário?" subtitle={`Esta ação remove a conta de ${removing.name}. Não será possível desfazer.`} onClose={() => setRemoving(null)}>
       <div className="warning-card"><Trash2 size={17} /><span>A conta será removida da lista de usuários da plataforma.</span></div><div className="dialog-actions"><Button variant="secondary" onClick={() => setRemoving(null)} testId="button-cancel-delete-user">Cancelar</Button><Button variant="danger" onClick={confirmDelete} disabled={deleteUser.isPending} testId="button-confirm-delete-user">{deleteUser.isPending ? 'Excluindo…' : 'Excluir conta'}</Button></div>
