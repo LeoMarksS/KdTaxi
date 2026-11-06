@@ -2,7 +2,7 @@
   "expo": {
     "name": "KD TAXI",
     "slug": "kd-taxi",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "kd-taxi",
@@ -13,11 +13,12 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Usado para foto do perfil.",
         "NSPhotoLibraryUsageDescription": "Usado para selecionar foto do perfil.",
-        "NSMicrophoneUsageDescription": "Não utilizado."
+        "NSMicrophoneUsageDescription": "N\u00e3o utilizado."
       }
     },
     "android": {
       "package": "com.kdtaxi.app",
+      "versionCode": 2,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#0D0D0D"
@@ -29,12 +30,13 @@
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.VIBRATE",
         "android.permission.MODIFY_AUDIO_SETTINGS"
-      ]
+      ],
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/images/icon.png",
-      "title": "KD TAXI — Chame seu táxi agora",
-      "description": "KD TAXI é o aplicativo de transporte para sua cidade. Chame um motorista em segundos, acompanhe em tempo real e pague um preço justo.",
+      "title": "KD TAXI \u2014 Chame seu t\u00e1xi agora",
+      "description": "KD TAXI \u00e9 o aplicativo de transporte para sua cidade. Chame um motorista em segundos, acompanhe em tempo real e pague um pre\u00e7o justo.",
       "themeColor": "#0D0D0D",
       "backgroundColor": "#0D0D0D",
       "lang": "pt-BR"
@@ -61,14 +63,17 @@
         {
           "icon": "./assets/images/icon.png",
           "color": "#F5C518",
-          "sounds": []
+          "sounds": [
+            "./assets/sounds/ride_alert.wav",
+            "./assets/sounds/chat_message.wav"
+          ]
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Permitir acesso às fotos para foto do perfil.",
-          "cameraPermission": "Permitir acesso à câmera para foto do perfil.",
+          "photosPermission": "Permitir acesso \u00e0s fotos para foto do perfil.",
+          "cameraPermission": "Permitir acesso \u00e0 c\u00e2mera para foto do perfil.",
           "microphonePermission": false
         }
       ],
@@ -88,7 +93,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "6e6878b1-00f0-4847-842d-dd75643b2e4d"
+        "projectId": "5fb3cb5d-d1c2-4bf7-b2a7-aef44055f44a"
       }
     },
     "owner": "leomarkss"

@@ -17,6 +17,12 @@ import {
 import logo from './assets/kd-taxi-icon.png';
 import NotFound from '@/pages/not-found';
 
+function accountDeletionError(error: unknown): string {
+  const data = error && typeof error === 'object' && 'data' in error ? error.data : null;
+  return data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
+    ? data.error : 'Não foi possível excluir esta conta.';
+}
+
 const TOKEN_KEY = 'kd-taxi-admin-token';
 const USER_KEY = 'kd-taxi-admin-user';
 setAuthTokenGetter(() => localStorage.getItem(TOKEN_KEY));
@@ -202,7 +208,7 @@ function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'er
   };
   const confirmDelete = () => {
     if (!removing) return;
-    deleteUser.mutate({ id: removing.id }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() }); void queryClient.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() }); notify('Conta excluída.'); setRemoving(null); }, onError: (error) => { if (isAuthError(error)) { raiseAuthExpired(); return; } notify('Não foi possível excluir esta conta.', 'error'); } });
+    deleteUser.mutate({ id: removing.id }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() }); void queryClient.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() }); notify('Conta excluída.'); setRemoving(null); }, onError: (error) => { if (isAuthError(error)) { raiseAuthExpired(); return; } notify(accountDeletionError(error), 'error'); } });
   };
   const saveDriverVehicle = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -293,8 +299,8 @@ function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'er
         <Button variant="danger" onClick={() => void decideDriver('rejected')} disabled={reviewSaving} testId="button-reject-driver">Solicitar correção</Button>
       </div>
     </Dialog>}
-    {removing && <Dialog title="Excluir usuário?" subtitle={`Esta ação remove a conta de ${removing.name}. Não será possível desfazer.`} onClose={() => setRemoving(null)}>
-      <div className="warning-card"><Trash2 size={17} /><span>A conta será removida da lista de usuários da plataforma.</span></div><div className="dialog-actions"><Button variant="secondary" onClick={() => setRemoving(null)} testId="button-cancel-delete-user">Cancelar</Button><Button variant="danger" onClick={confirmDelete} disabled={deleteUser.isPending} testId="button-confirm-delete-user">{deleteUser.isPending ? 'Excluindo…' : 'Excluir conta'}</Button></div>
+    {removing && <Dialog title="Excluir usuário?" subtitle={`Esta ação encerra o acesso de ${removing.name} e oculta a conta.`} onClose={() => setRemoving(null)}>
+      <div className="warning-card"><Trash2 size={17} /><span>A conta será removida da lista. O histórico de corridas será preservado.</span></div><div className="dialog-actions"><Button variant="secondary" onClick={() => setRemoving(null)} testId="button-cancel-delete-user">Cancelar</Button><Button variant="danger" onClick={confirmDelete} disabled={deleteUser.isPending} testId="button-confirm-delete-user">{deleteUser.isPending ? 'Excluindo…' : 'Excluir conta'}</Button></div>
     </Dialog>}
   </main>;
 }

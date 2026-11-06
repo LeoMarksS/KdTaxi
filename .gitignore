@@ -47,3 +47,19 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Local backups and credentials
+backups/
+*.bak
+*.logout-bak
+*.tmp
+.env
+.env.*
+.config/
+*.tar.gz
+
+/KD-Taxi*-BK*/
+
+/google-services.json
+
+*.zip

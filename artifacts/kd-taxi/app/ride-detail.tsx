@@ -3,7 +3,7 @@ import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useState } from "react";
 import {
-  Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View,
+  Alert, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -15,8 +15,9 @@ export default function RideDetailScreen() {
   const { rideId } = useLocalSearchParams<{ rideId: string }>();
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { activeRides, unreadByRide, finishRide, cancelRide } = useApp();
+  const { activeRides, unreadByRide, startRide, finishRide, cancelRide } = useApp();
 
+  const [confirmStart, setConfirmStart] = useState(false);
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -24,20 +25,43 @@ export default function RideDetailScreen() {
   const ride = activeRides.find((r) => r.id === rideId);
   const unread = unreadByRide[rideId ?? ""] ?? 0;
 
+  const handleStart = async () => {
+    if (!confirmStart) { setConfirmStart(true); return; }
+    setLoading(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const ok = await startRide(rideId!);
+    setLoading(false);
+    if (ok) {
+      setConfirmStart(false);
+    } else {
+      Alert.alert("Não foi possível iniciar", "Verifique sua conexão e tente novamente.");
+    }
+  };
+
   const handleFinish = async () => {
     if (!confirmFinish) { setConfirmFinish(true); return; }
     setLoading(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    await finishRide(rideId!);
-    router.back();
+    const ok = await finishRide(rideId!);
+    if (ok) {
+      router.back();
+    } else {
+      setLoading(false);
+      Alert.alert("Não foi possível finalizar", "Verifique sua conexão e tente novamente.");
+    }
   };
 
   const handleCancel = async () => {
     if (!confirmCancel) { setConfirmCancel(true); return; }
     setLoading(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    await cancelRide(rideId!);
-    router.back();
+    const ok = await cancelRide(rideId!);
+    if (ok) {
+      router.back();
+    } else {
+      setLoading(false);
+      Alert.alert("Não foi possível cancelar", "Verifique sua conexão e tente novamente.");
+    }
   };
 
   const s = StyleSheet.create({
@@ -163,10 +187,14 @@ export default function RideDetailScreen() {
         <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
           <Feather name="chevron-left" size={22} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>Corrida em andamento</Text>
+        <Text style={s.headerTitle}>
+          {ride.status === "accepted" ? "Aguardando início" : "Corrida em andamento"}
+        </Text>
         <View style={s.statusBadge}>
           <View style={s.statusDot} />
-          <Text style={s.statusText}>Ativa</Text>
+          <Text style={s.statusText}>
+            {ride.status === "accepted" ? "Aguardando início" : "Em andamento"}
+          </Text>
         </View>
       </View>
 
@@ -256,7 +284,17 @@ export default function RideDetailScreen() {
               <TouchableOpacity style={s.cancelBtnConfirm} disabled={loading} onPress={handleCancel}>
                 <Text style={s.cancelBtnTextConfirm}>Confirmar cancel.</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.cancelBtn} onPress={() => setConfirmCancel(false)}>
+              <TouchableOpacity style={s.cancelBtn} disabled={loading} onPress={() => setConfirmCancel(false)}>
+                <Text style={s.cancelBtnText}>Voltar</Text>
+              </TouchableOpacity>
+            </>
+          ) : confirmStart ? (
+            <>
+              <TouchableOpacity style={s.finishBtnConfirm} disabled={loading} onPress={handleStart}>
+                <Feather name="play" size={18} color="#fff" />
+                <Text style={s.finishBtnText}>Confirmar início</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.cancelBtn} disabled={loading} onPress={() => setConfirmStart(false)}>
                 <Text style={s.cancelBtnText}>Voltar</Text>
               </TouchableOpacity>
             </>
@@ -266,17 +304,27 @@ export default function RideDetailScreen() {
                 <Feather name="flag" size={18} color="#fff" />
                 <Text style={s.finishBtnText}>Confirmar fim</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.cancelBtn} onPress={() => setConfirmFinish(false)}>
+              <TouchableOpacity style={s.cancelBtn} disabled={loading} onPress={() => setConfirmFinish(false)}>
                 <Text style={s.cancelBtnText}>Voltar</Text>
               </TouchableOpacity>
             </>
           ) : (
             <>
-              <TouchableOpacity style={s.finishBtn} onPress={handleFinish}>
-                <Feather name="flag" size={18} color="#fff" />
-                <Text style={s.finishBtnText}>Finalizar corrida</Text>
+              <TouchableOpacity
+                style={s.finishBtn}
+                disabled={loading}
+                onPress={ride.status === "accepted" ? handleStart : handleFinish}
+              >
+                <Feather
+                  name={ride.status === "accepted" ? "play" : "flag"}
+                  size={18}
+                  color="#fff"
+                />
+                <Text style={s.finishBtnText}>
+                  {ride.status === "accepted" ? "Iniciar corrida" : "Finalizar corrida"}
+                </Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.cancelBtn} onPress={handleCancel}>
+              <TouchableOpacity style={s.cancelBtn} disabled={loading} onPress={handleCancel}>
                 <Text style={s.cancelBtnText}>Cancelar</Text>
               </TouchableOpacity>
             </>

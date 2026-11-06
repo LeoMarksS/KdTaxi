@@ -1,3 +1,4 @@
+import Constants from "expo-constants";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
@@ -17,11 +18,15 @@ import { UserAvatar } from "@/components/UserAvatar";
 export default function ProfileScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, updateProfile, updateDriverVehicle, logout } = useApp();
+  const { user, updateProfile, changePassword, updateDriverVehicle, logout } = useApp();
 
   const [name, setName] = useState(user?.name ?? "");
   const [photo, setPhoto] = useState(user?.photo);
   const [saving, setSaving] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
   const [vehicleType, setVehicleType] = useState<VehicleType>(user?.vehicleType ?? "car");
   const [vehicleBrand, setVehicleBrand] = useState(user?.vehicleBrand ?? "");
   const [vehicleModel, setVehicleModel] = useState(user?.vehicleModel ?? "");
@@ -106,6 +111,35 @@ export default function ProfileScreen() {
     setSaving(false);
     if (vehicleChanged) Alert.alert("Veículo enviado", "Aguarde nova aprovação antes de receber corridas.");
     router.back();
+  };
+
+  const handleChangePassword = async () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      Alert.alert("Atenção", "Preencha os três campos de senha.");
+      return;
+    }
+    if (newPassword.length < 12 || newPassword.length > 128) {
+      Alert.alert("Senha inválida", "A nova senha deve ter entre 12 e 128 caracteres.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      Alert.alert("Atenção", "A confirmação da nova senha não corresponde.");
+      return;
+    }
+
+    setChangingPassword(true);
+    const result = await changePassword(currentPassword, newPassword);
+    setChangingPassword(false);
+
+    if (!result.ok) {
+      Alert.alert("Não foi possível alterar", result.error ?? "Verifique os dados e tente novamente.");
+      return;
+    }
+
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    Alert.alert("Senha alterada", "Sua senha foi atualizada. As outras sessões foram encerradas.");
   };
 
   const handleCancel = () => {
@@ -226,6 +260,58 @@ export default function ProfileScreen() {
             </View>
           </View>
 
+          <View style={s.formCard}>
+            <Text style={s.label}>Senha atual</Text>
+            <TextInput
+              style={s.input}
+              value={currentPassword}
+              onChangeText={setCurrentPassword}
+              secureTextEntry
+              autoCapitalize="none"
+              placeholder="Digite sua senha atual"
+              placeholderTextColor={colors.mutedForeground}
+              maxLength={128}
+            />
+
+            <Text style={[s.label, { marginTop: 16 }]}>Nova senha</Text>
+            <TextInput
+              style={s.input}
+              value={newPassword}
+              onChangeText={setNewPassword}
+              secureTextEntry
+              autoCapitalize="none"
+              placeholder="Mínimo de 12 caracteres"
+              placeholderTextColor={colors.mutedForeground}
+              maxLength={128}
+            />
+
+            <Text style={[s.label, { marginTop: 16 }]}>Confirmar nova senha</Text>
+            <TextInput
+              style={s.input}
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              secureTextEntry
+              autoCapitalize="none"
+              placeholder="Digite novamente a nova senha"
+              placeholderTextColor={colors.mutedForeground}
+              maxLength={128}
+            />
+          </View>
+
+          <TouchableOpacity
+            style={[s.saveBtn, { opacity: changingPassword ? 0.6 : 1 }]}
+            onPress={handleChangePassword}
+            disabled={changingPassword}
+          >
+            {changingPassword ? (
+              <ActivityIndicator color="#000" size="small" />
+            ) : (
+              <>
+                <Feather name="lock" size={18} color="#000" />
+                <Text style={s.saveBtnText}>Alterar senha</Text>
+              </>
+            )}
+          </TouchableOpacity>
           {user?.mode === "driver" && (
             <View style={s.formCard}>
               <Text style={s.label}>Veículo</Text>
@@ -277,13 +363,24 @@ export default function ProfileScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity style={s.logoutBtn} onPress={() => {
-            Alert.alert("Sair da conta", "Tem certeza que deseja sair?", [
-              { text: "Cancelar", style: "cancel" },
-              { text: "Sair", style: "destructive", onPress: () => { logout(); router.replace("/login"); } },
-            ]);
+            const performLogout = () => {
+              logout();
+              router.replace("/login");
+            };
+
+            if (Platform.OS === "web") {
+              const confirmed = window.confirm("Tem certeza que deseja sair?");
+              if (confirmed) performLogout();
+            } else {
+              Alert.alert("Sair da conta", "Tem certeza que deseja sair?", [
+                { text: "Cancelar", style: "cancel" },
+                { text: "Sair", style: "destructive", onPress: performLogout },
+              ]);
+            }
           }}>
             <Text style={s.logoutText}>Sair da conta</Text>
           </TouchableOpacity>
+          <Text style={{ color: colors.mutedForeground, textAlign: "center", marginBottom: 20 }}>Versão {Constants.expoConfig?.version} · {Constants.expoConfig?.extra?.buildRevision ?? "local"}</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </View>

@@ -28,6 +28,8 @@ export interface User {
   photo?: string;
   rating?: number;
   rideCount?: number;
+  active?: boolean;
+  isOnline?: boolean;
 }
 
 const MAX_CACHED_USER_PHOTO_CHARS = 32 * 1024;
@@ -102,7 +104,8 @@ export interface ChatMessage {
 export interface PriceRule {
   id: string;
   destination: string;
-  price: number;
+  carPrice: number | null;
+  motorcyclePrice: number | null;
   isLocal?: boolean;
 }
 
@@ -124,10 +127,11 @@ export interface AdminStats {
 }
 
 interface AppContextValue {
-  isAuthLoading: boolean;
+  isSessionReady: boolean;
   user: User | null;
   setUser: (user: User | null) => void;
   updateProfile: (name: string, photo?: string) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>;
   updateDriverVehicle: (details: DriverVehicleDetails) => Promise<{ ok: boolean; error?: string }>;
   isDriverOnline: boolean;
   setDriverOnline: (online: boolean) => void;
@@ -146,8 +150,9 @@ interface AppContextValue {
   requestRide: (origin: string, destination: string, payment: "pix" | "dinheiro", vehicleType?: VehicleType) => Promise<Ride | null>;
   acceptRide: (rideId: string) => Promise<void>;
   declineRide: (rideId: string) => void;
-  finishRide: (rideId: string) => Promise<void>;
-  cancelRide: (rideId: string) => Promise<void>;
+  startRide: (rideId: string) => Promise<boolean>;
+  finishRide: (rideId: string) => Promise<boolean>;
+  cancelRide: (rideId: string) => Promise<boolean>;
   rateRide: (rideId: string, rating: number) => Promise<void>;
   cancelSoundAlerts: () => void;
   logout: () => void;
@@ -160,9 +165,9 @@ interface AppContextValue {
   refreshAdminData: () => Promise<void>;
   refreshAdminStats: () => Promise<void>;
   refreshPricing: () => Promise<void>;
-  setPricingRule: (destination: string, price: number, isLocal?: boolean) => Promise<void>;
+  setPricingRule: (destination: string, carPrice: number | null, motorcyclePrice: number | null, isLocal?: boolean) => Promise<void>;
   deletePricingRule: (id: string) => Promise<void>;
-  lookupPrice: (destination: string) => Promise<{ price: number; isLocal: boolean } | null>;
+  lookupPrice: (destination: string, vehicleType: VehicleType) => Promise<{ price: number; isLocal: boolean } | null>;
   finishedRideToRate: Ride | null;
   clearFinishedRideToRate: () => void;
   // Admin operations
@@ -187,6 +192,10 @@ interface AppContextValue {
 
 const AppContext = createContext<AppContextValue | null>(null);
 export const API_BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
+
+function chatReadKey(userId: string, rideId: string) {
+  return `kd_chat_read:${userId}:${rideId}`;
+}
 
 // Play a beep sound to alert driver of incoming ride
 async function playRideRequestSound() {
@@ -214,7 +223,7 @@ async function playRideRequestSound() {
   try {
     const { createAudioPlayer, setAudioModeAsync } = await import("expo-audio");
     await setAudioModeAsync({ playsInSilentMode: true });
-    const player = createAudioPlayer("https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3");
+    const player = createAudioPlayer(require("../assets/sounds/ride_alert.wav"));
     player.volume = 1;
     player.play();
     setTimeout(() => player.remove(), 5000);
@@ -228,7 +237,7 @@ function matchesDriverVehicle(user: User, ride: Ride): boolean {
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [user, setUserState] = useState<User | null>(null);
   const [token, setTokenState] = useState<string | null>(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [isSessionReady, setIsSessionReady] = useState(false);
   const tokenRef = useRef<string | null>(null);
   const [isDriverOnline, setDriverOnlineState] = useState(false);
   const [activeRide, setActiveRide] = useState<Ride | null>(null);
@@ -249,6 +258,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const isDriverOnlineRef = useRef(false);
   // Stores the rideId whose chat is currently visible (null = no chat screen open)
   const isChatOpenRef = useRef<string | null>(null);
+  const chatMessagesRef = useRef<Record<string, ChatMessage[]>>({});
+  const readCursorsRef = useRef<Record<string, string>>({});
   // Timeout handles for the repeating ride-alert sound (cleared on accept/decline)
   const soundTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -256,31 +267,92 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { activeRideRef.current = activeRide; }, [activeRide]);
   useEffect(() => { activeRidesRef.current = activeRides; }, [activeRides]);
   useEffect(() => { isDriverOnlineRef.current = isDriverOnline; }, [isDriverOnline]);
+  useEffect(() => { chatMessagesRef.current = chatMessagesByRide; }, [chatMessagesByRide]);
 
-  // Load persisted state
+  const markReadThrough = useCallback((rideId: string, messageId: string) => {
+    const currentUser = userRef.current;
+    if (!currentUser) return;
+    const key = chatReadKey(currentUser.id, rideId);
+    readCursorsRef.current[key] = messageId;
+    void AsyncStorage.setItem(key, messageId).catch(() => {});
+  }, []);
+
+  // Aguarda a recuperação completa da sessão antes de liberar a navegação.
   useEffect(() => {
-    Promise.all([
-      AsyncStorage.getItem("kd_user"),
-      AsyncStorage.getItem("kd_token"),
-      AsyncStorage.getItem("kd_driver_online"),
-      AsyncStorage.getItem("kd_active_ride"),
-    ]).then(([userData, tokenData, driverOnline, activeRideData]) => {
-      const cachedUser = userData ? JSON.parse(userData) as User : null;
-      if (cachedUser?.mode === "admin") {
-        void AsyncStorage.multiRemove(["kd_user", "kd_token", "kd_driver_online", "kd_active_ride"])
-          .catch(() => console.warn("Não foi possível limpar a sessão administrativa deste aparelho."));
-        setIsAuthLoading(false);
-        return;
+    let cancelled = false;
+
+    const restorePersistedState = async () => {
+      try {
+        const [storedUser, storedToken, storedOnline, storedRide] =
+          await Promise.all([
+            AsyncStorage.getItem("kd_user").catch(() => null),
+            AsyncStorage.getItem("kd_token").catch(() => null),
+            AsyncStorage.getItem("kd_driver_online").catch(() => null),
+            AsyncStorage.getItem("kd_active_ride").catch(() => null),
+          ]);
+
+        if (cancelled) return;
+
+        let restoredUser: User | null = null;
+
+        if (storedUser && storedToken) {
+          try {
+            const parsed = JSON.parse(storedUser) as User;
+            if (
+              parsed &&
+              typeof parsed.id === "string" &&
+              parsed.id.length > 0 &&
+              typeof parsed.name === "string" &&
+              ["client", "driver"].includes(parsed.mode ?? "")
+            ) {
+              restoredUser = parsed;
+            }
+          } catch {
+            restoredUser = null;
+          }
+        }
+
+        // Usuário e token precisam existir juntos para restaurar o login.
+        if (restoredUser && storedToken) {
+          tokenRef.current = storedToken;
+          setTokenState(storedToken);
+          setUserState(restoredUser);
+        } else {
+          tokenRef.current = null;
+          setTokenState(null);
+          setUserState(null);
+          await Promise.all([
+            AsyncStorage.removeItem("kd_user").catch(() => {}),
+            AsyncStorage.removeItem("kd_token").catch(() => {}),
+          ]);
+        }
+
+        setDriverOnlineState(storedOnline === "true");
+
+        if (storedRide) {
+          try {
+            const parsedRide = JSON.parse(storedRide) as Ride;
+            setActiveRide(
+              parsedRide && typeof parsedRide.id === "string"
+                ? parsedRide
+                : null
+            );
+          } catch {
+            setActiveRide(null);
+          }
+        }
+      } catch (error) {
+        console.warn("Não foi possível recuperar a sessão salva.", error);
+      } finally {
+        if (!cancelled) setIsSessionReady(true);
       }
-      if (cachedUser) setUserState(cachedUser);
-      if (tokenData) {
-        tokenRef.current = tokenData;
-        setTokenState(tokenData);
-      }
-      if (driverOnline === "true") setDriverOnlineState(true);
-      if (activeRideData) setActiveRide(JSON.parse(activeRideData) as Ride);
-      setIsAuthLoading(false);
-    }).catch(() => setIsAuthLoading(false));
+    };
+
+    void restorePersistedState();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const setToken = useCallback((t: string | null) => {
@@ -424,6 +496,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, [user, setUser, authFetch]);
 
+  const changePassword = useCallback(async (
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      const res = await authFetch("/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { ok: false, error: data.error ?? "Não foi possível alterar a senha." };
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false, error: "Sem conexão com o servidor." };
+    }
+  }, [authFetch]);
+
   const login = useCallback(async (phone: string, password: string): Promise<{ ok: boolean; error?: string }> => {
     try {
       const res = await fetch(`${API_BASE}/login`, {
@@ -469,21 +561,54 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [setUser, setToken]);
 
-  // Register push notifications when user logs in
+  // Register push at login and retry when the app returns to foreground.
   useEffect(() => {
-    if (!user) return;
-    registerForPushNotifications().then(async (pushToken) => {
-      if (pushToken && user.id) {
-        try {
-          await authFetch(`/users/${user.id}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pushToken }),
-          });
-        } catch {}
+    if (!user?.id || !token || Platform.OS === "web") return;
+    let cancelled = false;
+    let running = false;
+
+    const registerDevice = async () => {
+      if (running || cancelled) return;
+      running = true;
+      try {
+        const pushToken = await registerForPushNotifications();
+        if (!pushToken || cancelled) return;
+        const res = await authFetch(`/users/${user.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pushToken }),
+        });
+        if (!res.ok) {
+          console.warn("[push] O servidor não confirmou o registro do aparelho.");
+        }
+      } catch {
+        console.warn("[push] Falha de conexão ao salvar o registro do aparelho.");
+      } finally {
+        running = false;
       }
+    };
+
+    void registerDevice();
+    const subscription = AppState.addEventListener("change", state => {
+      if (state === "active") void registerDevice();
     });
-  }, [user?.id]);
+    return () => {
+      cancelled = true;
+      subscription.remove();
+    };
+  }, [user?.id, token, authFetch]);
+
+  // Restaura a disponibilidade se a preferência local carregar depois do socket.
+  useEffect(() => {
+    if (!user || user.mode !== "driver" || !token || !isDriverOnline) return;
+    if (!socketRef.current?.connected) return;
+
+    authFetch(`/users/${user.id}/availability`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ online: true }),
+    }).catch(() => {});
+  }, [user?.id, user?.mode, token, isDriverOnline, authFetch]);
 
   // Socket connection
   useEffect(() => {
@@ -506,6 +631,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const me = userRef.current;
       if (!me) return;
       try {
+        if (me.mode === "driver") {
+          await authFetch(`/users/${me.id}/availability`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ online: isDriverOnlineRef.current }),
+          });
+        }
+
         const res = await authFetch(`/rides`);
         if (!res.ok) return;
         const all: Ride[] = await res.json();
@@ -519,13 +652,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             (r) => r.driverId === me.id &&
               (r.status === "accepted" || r.status === "in_progress")
           );
-          if (myActive.length > 0) {
-            setActiveRides((prev) => {
-              const existingIds = new Set(prev.map((r) => r.id));
-              const toAdd = myActive.filter((r) => !existingIds.has(r.id));
-              return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
-            });
-          }
+          setActiveRides(myActive);
         } else if (me.mode === "client") {
           // Server is the source of truth for the client's active ride.
           // This covers both reconnects and re-logins after logout.
@@ -545,10 +672,48 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             }
           }
         }
+
+        const chatRides = all.filter((r) =>
+          (r.status === "accepted" || r.status === "in_progress") &&
+          (r.clientId === me.id || r.driverId === me.id)
+        );
+        await Promise.all(chatRides.map(async (ride) => {
+          try {
+            const response = await authFetch(`/rides/${ride.id}/chat`);
+            if (!response.ok) return;
+            const history = await response.json() as ChatMessage[];
+            if (userRef.current?.id !== me.id) return;
+            setChatMessagesByRide((prev) => ({ ...prev, [ride.id]: history }));
+            if (isChatOpenRef.current === ride.id) {
+              const latest = history.at(-1);
+              if (latest) markReadThrough(ride.id, latest.id);
+              setUnreadByRide((prev) => ({ ...prev, [ride.id]: 0 }));
+              return;
+            }
+            const key = chatReadKey(me.id, ride.id);
+            const cursor = readCursorsRef.current[key] ?? await AsyncStorage.getItem(key);
+            if (cursor) readCursorsRef.current[key] = cursor;
+            if (isChatOpenRef.current === ride.id) return;
+            const index = cursor ? history.findIndex((m) => m.id === cursor) : -1;
+            const unread = history.slice(index + 1).filter((m) => m.senderId !== me.id).length;
+            setUnreadByRide((prev) => ({ ...prev, [ride.id]: unread }));
+          } catch {}
+        }));
       } catch {}
     };
 
-    socket.on("connect", reconcile);
+    const reportAppState = (state?: string | null) => {
+      socket.emit("app_state", state ?? AppState.currentState ?? "unknown");
+    };
+    const onConnect = () => {
+      reportAppState();
+      void reconcile();
+    };
+    socket.on("connect", onConnect);
+    const appStateSubscription = AppState.addEventListener("change", (state) => {
+      reportAppState(state);
+      if (state === "active" && socket.connected) void reconcile();
+    });
 
     socket.on("nova_corrida", (ride: Ride) => {
       const currentUser = userRef.current;
@@ -600,6 +765,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
+    socket.on("corrida_indisponivel", (rideId: string) => {
+      if (userRef.current?.mode === "driver") {
+        setPendingRides((prev) => prev.filter((r) => r.id !== rideId));
+      }
+    });
+
+    socket.on("corrida_iniciada", (ride: Ride) => {
+      const me = userRef.current;
+      if (me?.mode === "driver" && me.id === ride.driverId) {
+        setActiveRides((prev) => {
+          const exists = prev.some((r) => r.id === ride.id);
+          return exists ? prev.map((r) => r.id === ride.id ? ride : r) : [...prev, ride];
+        });
+      } else if (me?.id === ride.clientId) {
+        setActiveRide(ride);
+        scheduleLocalNotification("Corrida iniciada!", "Sua corrida está em andamento");
+      }
+    });
+
     socket.on("corrida_finalizada", (ride: Ride) => {
       const me = userRef.current;
       if (me?.mode === "driver" && me?.id === ride.driverId) {
@@ -635,20 +819,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         // Only increment and notify when the relevant chat screen is not open
         if (isChatOpenRef.current !== msg.rideId) {
           setUnreadByRide((prev) => ({ ...prev, [msg.rideId]: (prev[msg.rideId] ?? 0) + 1 }));
-          scheduleLocalNotification(`Mensagem de ${msg.senderName}`, msg.text);
+          scheduleLocalNotification(`Mensagem de ${msg.senderName}`, msg.text, "chat");
+        } else {
+          markReadThrough(msg.rideId, msg.id);
         }
+      } else if (isChatOpenRef.current === msg.rideId) {
+        markReadThrough(msg.rideId, msg.id);
       }
     });
 
     return () => {
-      socket.off("connect", reconcile);
+      appStateSubscription.remove();
+      socket.off("connect", onConnect);
       socket.disconnect();
       socketRef.current = null;
       // Cancel any pending sound repeat timers when connection is torn down
       soundTimersRef.current.forEach(clearTimeout);
       soundTimersRef.current = [];
     };
-  }, [user, token]);
+  }, [user, token, authFetch, markReadThrough]);
 
   const requestRide = useCallback(async (
     origin: string,
@@ -657,7 +846,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     vehicleType: VehicleType = "car",
   ): Promise<Ride | null> => {
     if (!user) return null;
-    const res = await authFetch(`/rides`, {
+    const res = await authFetch(`/request-ride`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -703,31 +892,58 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setPendingRides((prev) => prev.filter((r) => r.id !== rideId));
   }, []);
 
-  const finishRide = useCallback(async (rideId: string) => {
-    const res = await authFetch(`/finish-ride`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rideId }),
-    });
-    if (res.ok) {
+  const startRide = useCallback(async (rideId: string): Promise<boolean> => {
+    try {
+      const res = await authFetch(`/start-ride`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rideId }),
+      });
+      if (!res.ok) return false;
+      const ride: Ride = await res.json();
+      setActiveRides((prev) => prev.map((r) => r.id === rideId ? ride : r));
+      setActiveRide((prev) => prev?.id === rideId ? ride : prev);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [authFetch]);
+
+  const finishRide = useCallback(async (rideId: string): Promise<boolean> => {
+    try {
+      const res = await authFetch(`/finish-ride`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rideId }),
+      });
+      if (!res.ok) return false;
       const ride: Ride = await res.json();
       setActiveRide(null);
       setActiveRides((prev) => prev.filter((r) => r.id !== rideId));
       setFinishedRideToRate(ride);
       setMyRides((prev) => [ride, ...prev.filter((r) => r.id !== ride.id)]);
       setChatMessagesByRide((prev) => { const next = { ...prev }; delete next[rideId]; return next; });
+      return true;
+    } catch {
+      return false;
     }
   }, [authFetch]);
 
-  const cancelRide = useCallback(async (rideId: string) => {
-    await authFetch(`/cancel-ride`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rideId }),
-    });
-    setActiveRide(null);
-    setActiveRides((prev) => prev.filter((r) => r.id !== rideId));
-    setChatMessagesByRide((prev) => { const next = { ...prev }; delete next[rideId]; return next; });
+  const cancelRide = useCallback(async (rideId: string): Promise<boolean> => {
+    try {
+      const res = await authFetch(`/cancel-ride`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rideId }),
+      });
+      if (!res.ok) return false;
+      setActiveRide((prev) => prev?.id === rideId ? null : prev);
+      setActiveRides((prev) => prev.filter((r) => r.id !== rideId));
+      setChatMessagesByRide((prev) => { const next = { ...prev }; delete next[rideId]; return next; });
+      return true;
+    } catch {
+      return false;
+    }
   }, [authFetch]);
 
   const rateRide = useCallback(async (rideId: string, rating: number) => {
@@ -747,7 +963,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const markChatRead = useCallback((rideId: string) => {
     setUnreadByRide((prev) => ({ ...prev, [rideId]: 0 }));
-  }, []);
+    const latest = chatMessagesRef.current[rideId]?.at(-1);
+    if (latest) markReadThrough(rideId, latest.id);
+  }, [markReadThrough]);
 
   const fetchChatHistory = useCallback(async (rideId: string) => {
     try {
@@ -762,8 +980,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
         return { ...prev, [rideId]: merged };
       });
+      if (isChatOpenRef.current === rideId) {
+        const latest = history.at(-1);
+        if (latest) markReadThrough(rideId, latest.id);
+        setUnreadByRide((prev) => ({ ...prev, [rideId]: 0 }));
+      }
     } catch {}
-  }, [authFetch]);
+  }, [authFetch, markReadThrough]);
 
   const logout = useCallback(() => {
     if (tokenRef.current) {
@@ -776,6 +999,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setPendingRides([]);
     setChatMessagesByRide({});
     setUnreadByRide({});
+    readCursorsRef.current = {};
     setMyRides([]);
     setFinishedRideToRate(null);
     setDriverOnlineState(false);
@@ -814,12 +1038,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (res.ok) setPricing(await res.json());
   }, [authFetch]);
 
-  const setPricingRule = useCallback(async (destination: string, price: number, isLocal?: boolean) => {
-    await authFetch(`/pricing`, {
+  const setPricingRule = useCallback(async (
+    destination: string,
+    carPrice: number | null,
+    motorcyclePrice: number | null,
+    isLocal?: boolean,
+  ) => {
+    const res = await authFetch(`/pricing`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ destination, price, isLocal }),
+      body: JSON.stringify({ destination, carPrice, motorcyclePrice, isLocal }),
     });
+    if (!res.ok) throw new Error("Não foi possível salvar as tarifas.");
     await refreshPricing();
   }, [refreshPricing, authFetch]);
 
@@ -828,15 +1058,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await refreshPricing();
   }, [refreshPricing, authFetch]);
 
-  const lookupPrice = useCallback(async (destination: string): Promise<{ price: number; isLocal: boolean } | null> => {
+  const lookupPrice = useCallback(async (
+    destination: string,
+    vehicleType: VehicleType,
+  ): Promise<{ price: number; isLocal: boolean } | null> => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
     try {
-      const res = await authFetch(`/pricing/lookup?destination=${encodeURIComponent(destination)}`);
-      if (res.ok) {
-        const d = await res.json();
-        if (d.price !== null && d.price !== undefined) return { price: d.price, isLocal: d.isLocal ?? false };
+      const query = new URLSearchParams({
+        destination,
+        vehicleType,
+      });
+      const res = await authFetch(`/pricing/lookup?${query.toString()}`, {
+        signal: controller.signal,
+      });
+      if (!res.ok) return null;
+
+      const data = await res.json();
+      if (typeof data.price === "number" && Number.isFinite(data.price) && data.price >= 0) {
+        return { price: data.price, isLocal: data.isLocal ?? false };
       }
-    } catch {}
-    return null;
+      return null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
   }, [authFetch]);
 
   const adminUpdateUser = useCallback(async (id: string, data: {
@@ -890,14 +1137,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      isAuthLoading,
-      user, setUser, updateProfile, updateDriverVehicle,
+      isSessionReady,
+      user, setUser, updateProfile, changePassword, updateDriverVehicle,
       isDriverOnline, setDriverOnline,
       activeRide, setActiveRide, activeRides,
       pendingRides, chatMessagesByRide, sendChatMessage,
       unreadChatCount, unreadByRide, markChatRead, fetchChatHistory,
       socket: socketRef.current,
-      requestRide, acceptRide, declineRide, finishRide, cancelRide, rateRide, cancelSoundAlerts,
+      requestRide, acceptRide, declineRide, startRide, finishRide, cancelRide, rateRide, cancelSoundAlerts,
       logout, allRides, allUsers, pricing,
       myRides, fetchMyRides,
       adminStats, refreshAdminData, refreshAdminStats, refreshPricing,

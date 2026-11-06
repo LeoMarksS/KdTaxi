@@ -1,0 +1,10 @@
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+const root = fileURLToPath(new URL('../', import.meta.url));
+const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+git('fetch', 'origin', 'main');
+if (git('rev-parse', 'HEAD') !== git('rev-parse', 'origin/main')) throw Error('Atualize para a revisão oficial origin/main antes de compilar.');
+if (git('status', '--porcelain', '--untracked-files=normal')) throw Error('Existem alterações locais. Revise e sincronize antes de compilar.');
+await import('./check-mobile-config.mjs');
+for (const args of [['run', 'typecheck:libs'], ['--filter', '@workspace/kd-taxi', 'typecheck']]) execFileSync('pnpm', args, { cwd: root, stdio: 'inherit' });
+execFileSync('pnpm', ['dlx', 'eas-cli@27.4.1', 'build', '--platform', 'android', '--profile', 'preview', '--non-interactive'], { cwd: root + 'artifacts/kd-taxi', stdio: 'inherit' });
