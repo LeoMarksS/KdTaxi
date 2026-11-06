@@ -10,17 +10,23 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useApp } from "@/context/AppContext";
+import type { VehicleType } from "@/context/AppContext";
 import { useColors } from "@/hooks/useColors";
 import { UserAvatar } from "@/components/UserAvatar";
 
 export default function ProfileScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { user, updateProfile, logout } = useApp();
+  const { user, updateProfile, updateDriverVehicle, logout } = useApp();
 
   const [name, setName] = useState(user?.name ?? "");
   const [photo, setPhoto] = useState(user?.photo);
   const [saving, setSaving] = useState(false);
+  const [vehicleType, setVehicleType] = useState<VehicleType>(user?.vehicleType ?? "car");
+  const [vehicleBrand, setVehicleBrand] = useState(user?.vehicleBrand ?? "");
+  const [vehicleModel, setVehicleModel] = useState(user?.vehicleModel ?? "");
+  const [vehicleColor, setVehicleColor] = useState(user?.vehicleColor ?? "");
+  const [vehiclePlate, setVehiclePlate] = useState(user?.vehiclePlate ?? "");
 
   const pickPhoto = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -71,20 +77,45 @@ export default function ProfileScreen() {
     ]);
   };
 
-  const hasChanges = name.trim() !== (user?.name ?? "") || photo !== user?.photo;
+  const vehicleChanged = user?.mode === "driver" && (
+    vehicleType !== (user.vehicleType ?? "car") ||
+    vehicleBrand.trim() !== (user.vehicleBrand ?? "") ||
+    vehicleModel.trim() !== (user.vehicleModel ?? "") ||
+    vehicleColor.trim() !== (user.vehicleColor ?? "") ||
+    vehiclePlate.toUpperCase().replace(/[\s-]/g, "") !== (user.vehiclePlate ?? "")
+  );
 
   const handleSave = async () => {
     if (!name.trim()) return;
+    if (vehicleChanged && (!vehicleBrand.trim() || !vehicleModel.trim() || !vehicleColor.trim() ||
+        !/^[A-Z]{3}[0-9][A-Z0-9][0-9]{2}$/.test(vehiclePlate.toUpperCase().replace(/[\s-]/g, "")))) {
+      Alert.alert("Veículo incompleto", "Informe marca, modelo, cor e placa válida.");
+      return;
+    }
     setSaving(true);
+    if (vehicleChanged) {
+      const result = await updateDriverVehicle({ vehicleType, vehicleBrand, vehicleModel, vehicleColor, vehiclePlate });
+      if (!result.ok) {
+        setSaving(false);
+        Alert.alert("Não foi possível salvar", result.error);
+        return;
+      }
+    }
+    if (name.trim() !== user?.name || photo !== user?.photo) await updateProfile(name.trim(), photo);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    await updateProfile(name.trim(), photo);
     setSaving(false);
+    if (vehicleChanged) Alert.alert("Veículo enviado", "Aguarde nova aprovação antes de receber corridas.");
     router.back();
   };
 
   const handleCancel = () => {
     setName(user?.name ?? "");
     setPhoto(user?.photo);
+    setVehicleType(user?.vehicleType ?? "car");
+    setVehicleBrand(user?.vehicleBrand ?? "");
+    setVehicleModel(user?.vehicleModel ?? "");
+    setVehicleColor(user?.vehicleColor ?? "");
+    setVehiclePlate(user?.vehiclePlate ?? "");
     router.back();
   };
 
@@ -194,6 +225,33 @@ export default function ProfileScreen() {
               <Text style={s.phoneText}>{user?.phone}</Text>
             </View>
           </View>
+
+          {user?.mode === "driver" && (
+            <View style={s.formCard}>
+              <Text style={s.label}>Veículo</Text>
+              <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
+                {(["car", "motorcycle"] as const).map((type) => (
+                  <TouchableOpacity key={type} onPress={() => setVehicleType(type)}
+                    style={{ padding: 12, borderRadius: 10, backgroundColor: vehicleType === type ? colors.primary : colors.muted }}>
+                    <Text style={{ color: vehicleType === type ? "#000" : colors.foreground }}>
+                      {type === "car" ? "Carro" : "Moto"}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Text style={s.label}>Marca</Text>
+              <TextInput style={[s.input, { marginBottom: 12 }]} value={vehicleBrand} onChangeText={setVehicleBrand} maxLength={80} placeholder="Marca" placeholderTextColor={colors.mutedForeground} />
+              <Text style={s.label}>Modelo</Text>
+              <TextInput style={[s.input, { marginBottom: 12 }]} value={vehicleModel} onChangeText={setVehicleModel} maxLength={80} placeholder="Modelo" placeholderTextColor={colors.mutedForeground} />
+              <Text style={s.label}>Cor</Text>
+              <TextInput style={[s.input, { marginBottom: 12 }]} value={vehicleColor} onChangeText={setVehicleColor} maxLength={50} placeholder="Cor" placeholderTextColor={colors.mutedForeground} />
+              <Text style={s.label}>Placa</Text>
+              <TextInput style={s.input} value={vehiclePlate} onChangeText={setVehiclePlate} maxLength={8} autoCapitalize="characters" placeholder="ABC1D23" placeholderTextColor={colors.mutedForeground} />
+              <Text style={{ color: colors.mutedForeground, marginTop: 12 }}>
+                Alterações no veículo exigem nova aprovação antes de receber corridas.
+              </Text>
+            </View>
+          )}
 
           <TouchableOpacity
             style={[s.saveBtn, { opacity: !name.trim() || saving ? 0.6 : 1 }]}
