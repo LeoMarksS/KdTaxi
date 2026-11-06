@@ -757,7 +757,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } else if (me?.id === ride.clientId) {
         // Client whose ride was accepted: set their single active ride.
         setActiveRide(ride);
-        scheduleLocalNotification("Motorista encontrado!", `${ride.driverName} está a caminho`);
+        scheduleLocalNotification("Corrida aceita", `${ride.driverName} aceitou sua solicitação.`);
       }
       // All drivers: remove from pending list regardless of who accepted
       if (me?.mode === "driver") {

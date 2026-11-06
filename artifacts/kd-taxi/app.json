@@ -2,7 +2,7 @@
   "expo": {
     "name": "KD TAXI",
     "slug": "kd-taxi",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "kd-taxi",
@@ -18,7 +18,7 @@
     },
     "android": {
       "package": "com.kdtaxi.app",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#0D0D0D"

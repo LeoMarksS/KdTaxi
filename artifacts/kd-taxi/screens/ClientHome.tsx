@@ -181,8 +181,8 @@ export default function ClientHome() {
 
   const statusConfig = {
     waiting: { label: "Procurando motorista...", color: colors.statusWaiting, icon: "clock" as const },
-    accepted: { label: "Motorista a caminho!", color: colors.statusAccepted, icon: "check-circle" as const },
-    in_progress: { label: "Em andamento", color: colors.statusInProgress, icon: "navigation" as const },
+    accepted: { label: "Corrida aceita", color: colors.statusAccepted, icon: "check-circle" as const },
+    in_progress: { label: "Corrida em andamento", color: colors.statusInProgress, icon: "navigation" as const },
     finished: { label: "Corrida finalizada", color: colors.statusFinished, icon: "flag" as const },
     cancelled: { label: "Cancelada", color: colors.destructive, icon: "x-circle" as const },
   };
@@ -259,7 +259,7 @@ export default function ClientHome() {
       padding: 22, marginBottom: 18, borderWidth: 1, borderColor: colors.border,
     },
     statusBadge: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 16 },
-    statusText: { fontSize: 18, fontWeight: "700", fontFamily: "Inter_700Bold" },
+    statusText: { flexShrink: 1, fontSize: 18, fontWeight: "700", fontFamily: "Inter_700Bold" },
     rideDetail: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
     rideDetailText: { fontSize: 14, color: colors.foreground, flex: 1, fontFamily: "Inter_400Regular" },
     ridePriceBadge: {
@@ -274,6 +274,17 @@ export default function ClientHome() {
     },
     driverName: { fontSize: 16, fontWeight: "700", color: colors.foreground, fontFamily: "Inter_700Bold" },
     driverSub: { fontSize: 12, color: colors.mutedForeground, fontFamily: "Inter_400Regular" },
+    vehicleCard: { backgroundColor: colors.muted, borderRadius: 14, padding: 16, marginTop: 12, borderWidth: 1, borderColor: colors.border },
+    vehicleHeading: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 },
+    vehicleTitle: { color: colors.foreground, fontSize: 14, fontFamily: "Inter_600SemiBold", flex: 1 },
+    vehicleModel: { color: colors.foreground, fontSize: 17, fontFamily: "Inter_700Bold" },
+    vehicleColor: { color: colors.mutedForeground, fontSize: 14, fontFamily: "Inter_400Regular", marginTop: 5 },
+    plateCard: { backgroundColor: "#F8FAFC", borderRadius: 10, overflow: "hidden", marginTop: 14, borderWidth: 1, borderColor: "#CBD5E1" },
+    plateHeading: { backgroundColor: "#174EA6", paddingVertical: 6, paddingHorizontal: 10, alignItems: "center" },
+    plateLabel: { color: "#FFFFFF", fontSize: 11, fontFamily: "Inter_700Bold", letterSpacing: 1 },
+    plateValue: { color: "#111827", fontSize: 30, fontFamily: "Inter_700Bold", letterSpacing: 3, textAlign: "center", paddingVertical: 12, paddingHorizontal: 8 },
+    plateMissing: { color: "#475569", fontSize: 17, fontFamily: "Inter_500Medium", textAlign: "center", padding: 14 },
+    vehicleHint: { color: colors.mutedForeground, fontSize: 12, lineHeight: 18, fontFamily: "Inter_400Regular", marginTop: 12 },
     actionRow: { flexDirection: "row", gap: 12, marginTop: 16 },
     chatBtnWrap: { flex: 1, position: "relative" },
     chatBtn: {
@@ -655,13 +666,6 @@ export default function ClientHome() {
                   <View style={{ flex: 1 }}>
                     <Text style={s.driverName}>{activeRide.driverName}</Text>
                     <Text style={s.driverSub}>Seu motorista</Text>
-                    {activeRide.driverVehicleModel && (
-                      <Text style={s.driverSub}>
-                        {[activeRide.driverVehicleBrand, activeRide.driverVehicleModel,
-                          activeRide.driverVehicleColor, activeRide.driverVehiclePlate]
-                          .filter(Boolean).join(" · ")}
-                      </Text>
-                    )}
                     {(activeRide.driverAvgRating ?? 0) > 0 ? (
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 4 }}>
                         <StarRating rating={activeRide.driverAvgRating!} size={13} />
@@ -673,6 +677,26 @@ export default function ClientHome() {
                       <Text style={[s.driverSub, { marginTop: 2 }]}>Novo motorista</Text>
                     )}
                   </View>
+                </View>
+              )}
+
+              {activeRide.driverId && (activeRide.status === "accepted" || activeRide.status === "in_progress") && (
+                <View style={s.vehicleCard}>
+                  <View style={s.vehicleHeading}>
+                    <MaterialCommunityIcons name={activeRide.vehicleType === "motorcycle" ? "motorbike" : "car-side"} size={22} color={colors.primary} />
+                    <Text style={s.vehicleTitle}>Veículo da sua corrida</Text>
+                  </View>
+                  <Text style={s.vehicleModel}>
+                    {[activeRide.driverVehicleBrand, activeRide.driverVehicleModel].filter(Boolean).join(" ") || "Modelo não informado"}
+                  </Text>
+                  <Text style={s.vehicleColor}>Cor: {activeRide.driverVehicleColor || "não informada"}</Text>
+                  <View style={s.plateCard} accessible accessibilityLabel={`Placa do veículo: ${activeRide.driverVehiclePlate || "não informada"}`}>
+                    <View style={s.plateHeading}><Text style={s.plateLabel}>PLACA DO VEÍCULO</Text></View>
+                    <Text selectable style={activeRide.driverVehiclePlate ? s.plateValue : s.plateMissing}>
+                      {activeRide.driverVehiclePlate?.toUpperCase() || "Não informada"}
+                    </Text>
+                  </View>
+                  <Text style={s.vehicleHint}>Confira a placa e o motorista antes de embarcar.</Text>
                 </View>
               )}
 

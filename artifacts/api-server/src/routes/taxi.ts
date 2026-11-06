@@ -1548,7 +1548,7 @@ router.post("/accept-ride", requireAuth, async (req: Request, res: Response) => 
 
   const client = users.get(ride.clientId);
   if (client?.pushToken) {
-    sendPushNotification(client.pushToken, "Motorista encontrado!", `${driver.name} está a caminho`, { rideId });
+    sendPushNotification(client.pushToken, "Corrida aceita", `${driver.name} aceitou sua solicitação.`, { rideId });
   }
 
   res.json(rideForViewer(ride, driver));
