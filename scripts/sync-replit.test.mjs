@@ -22,7 +22,7 @@ test('sincronização preserva alterações locais e arquivo não versionado con
     run('git', ['config', 'user.email', 'test@example.invalid'], client); run('git', ['config', 'user.name', 'Test'], client);
     run('git', ['switch', '-c', 'anterior', base], client);
     writeFileSync(resolve(client, 'app.txt'), 'alteração local preservada\n'); writeFileSync(resolve(client, 'config.txt'), 'configuração local preservada\n');
-    writeFileSync(resolve(bin, 'pnpm'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    writeFileSync(resolve(bin, 'pnpm'), '#!/bin/sh\nif [ "$1" = install ] && [ "${CI:-}" != true ]; then exit 64; fi\nexit 0\n', { mode: 0o755 });
     run('bash', [resolve(import.meta.dirname, 'sync-replit.sh')], client, { REPL_ID: 'test', PATH: bin + ':' + process.env.PATH });
     assert.equal(run('git', ['rev-parse', 'HEAD'], client), official);
     assert.equal(readFileSync(resolve(client, 'app.txt'), 'utf8'), 'oficial\n');
