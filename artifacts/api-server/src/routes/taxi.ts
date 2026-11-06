@@ -473,7 +473,7 @@ export function sendChatPushNotification(userId: string, senderName: string, rid
     "Nova mensagem no KD TAXI",
     `Mensagem de ${senderName} no chat da sua corrida.`,
     { type: "chat_message", rideId },
-    { channelId: "ride_alerts_v1", sound: "default" },
+    { channelId: "chat_messages_v2", sound: "chat_message.wav" },
   );
 }
 
