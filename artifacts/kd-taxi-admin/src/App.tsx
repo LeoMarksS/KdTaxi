@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
+import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { QueryCache, QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { Route, Switch, useLocation, Router as WouterRouter, Link } from 'wouter';
 import { setAuthTokenGetter } from '@workspace/api-client-react';
@@ -27,7 +27,7 @@ const TOKEN_KEY = 'kd-taxi-admin-token';
 const USER_KEY = 'kd-taxi-admin-user';
 setAuthTokenGetter(() => localStorage.getItem(TOKEN_KEY));
 
-type PageName = 'overview' | 'users' | 'rides' | 'pricing';
+type PageName = 'overview' | 'users' | 'rides' | 'pricing' | 'approvals' | 'settings';
 type ToastState = { message: string; kind?: 'error' | 'success' } | null;
 type DriverUser = User & {
   vehicleBrand?: string; vehicleModel?: string; vehicleColor?: string; vehiclePlate?: string;
@@ -168,7 +168,7 @@ function RideRow({ ride, compact = false }: { ride: Ride; compact?: boolean }) {
   </tr>;
 }
 
-function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'error') => void }) {
+function UserPage({ notify, approvalsOnly = false }: { approvalsOnly?: boolean; notify: (message: string, kind?: 'success' | 'error') => void }) {
   const queryClient = useQueryClient();
   const query = useListUsers({ query: { queryKey: getListUsersQueryKey(), refetchInterval: AUTO_REFRESH_MS } });
   const createUser = useCreateAdminUser();
@@ -185,7 +185,7 @@ function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'er
   const [reviewError, setReviewError] = useState('');
   const [formError, setFormError] = useState('');
   const users = (query.data ?? []) as DriverUser[];
-  const filtered = useMemo(() => users.filter((user) => (filter === 'all' || user.mode === filter) && `${user.name} ${user.phone}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => a.name.localeCompare(b.name)), [users, filter, search]);
+  const filtered = useMemo(() => users.filter((user) => (!approvalsOnly || (user.mode === 'driver' && user.approvalStatus === 'pending')) && (filter === 'all' || user.mode === filter) && `${user.name} ${user.phone}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => a.name.localeCompare(b.name)), [users, filter, search, approvalsOnly]);
   const countByMode = (mode: string) => users.filter((user) => user.mode === mode).length;
   const saveUser = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setFormError('');
@@ -243,13 +243,13 @@ function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'er
   };
   const modalUser = editing ?? undefined;
   return <main className="page-enter">
-     <div className="page-heading"><div><div className="eyebrow">CADASTROS · {users.length.toLocaleString('pt-BR')} CONTAS</div><h1>Usuários</h1><p>Gerencie os perfis que fazem a operação acontecer.</p></div><Button onClick={() => { setFormError(''); setCreateMode('client'); setCreating(true); }} testId="button-add-user"><Plus size={16} /> Novo usuário</Button></div>
+     <div className="page-heading"><div><div className="eyebrow">CADASTROS · {users.length.toLocaleString('pt-BR')} CONTAS</div><h1>{approvalsOnly ? 'Aprovações pendentes' : 'Usuários'}</h1><p>{approvalsOnly ? 'Confira a foto e os dados do veículo antes de aprovar o motorista.' : 'Gerencie os perfis que fazem a operação acontecer.'}</p></div><Button onClick={() => { setFormError(''); setCreateMode('client'); setCreating(true); }} testId="button-add-user"><Plus size={16} /> Novo usuário</Button></div>
      <div className="summary-band"><div><span>Clientes</span><b>{countByMode('client')}</b></div><i /><div><span>Motoristas</span><b>{countByMode('driver')}</b></div><i /><div className="band-note"><span>Disponibilidade é gerida no app do motorista.</span></div></div>
     <section className="content-panel list-panel">
       <div className="filters-row"><div className="search-field"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome ou telefone" aria-label="Buscar usuários" data-testid="input-search-users" />{search && <button onClick={() => setSearch('')} aria-label="Limpar busca" data-testid="button-clear-user-search"><X size={14} /></button>}</div>
         <div className="filter-pills" role="group" aria-label="Filtrar usuários">{(['all', 'client', 'driver'] as const).map((option) => <button key={option} className={filter === option ? 'filter-active' : ''} onClick={() => setFilter(option)} data-testid={`filter-users-${option}`}>{option === 'all' ? `Todos ${users.length}` : `${roleName(option)} ${countByMode(option)}`}</button>)}</div></div>
        {query.isLoading && !query.data ? <LoadingRows /> : query.isError && !query.data ? <QueryError onRetry={() => void query.refetch()} /> : filtered.length === 0 ?
-        <EmptyState title={search ? 'Nenhum resultado' : 'Nenhum usuário cadastrado'} text={search ? 'Tente buscar por outro nome ou telefone.' : 'Cadastros aparecerão aqui quando forem criados.'} /> :
+        <EmptyState title={search ? 'Nenhum resultado' : approvalsOnly ? 'Nenhuma aprovação pendente' : 'Nenhum usuário cadastrado'} text={search ? 'Tente buscar por outro nome ou telefone.' : approvalsOnly ? 'Os novos motoristas e alterações de veículo aparecerão aqui.' : 'Cadastros aparecerão aqui quando forem criados.'} /> :
         <div className="table-wrap"><table><thead><tr><th>Perfil</th><th>Tipo</th><th>Corridas</th><th>Avaliação</th><th>Cadastro</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>
           {filtered.map((user) => <tr key={user.id} data-testid={`row-user-${user.id}`}>
             <td><div className="person-cell"><span className="avatar">{user.photo ? <img src={user.photo} alt="" /> : initials(user.name)}</span><div><strong data-testid={`text-user-name-${user.id}`}>{user.name}</strong><small className="mono">{user.phone}</small></div></div></td>
@@ -261,7 +261,7 @@ function UserPage({ notify }: { notify: (message: string, kind?: 'success' | 'er
             <td className="mono numeric">{user.rideCount.toLocaleString('pt-BR')}</td><td><span className="rating-cell"><Star size={13} />{user.rating.toFixed(1)}</span></td>
             <td className="date-cell">{formatDate(user.createdAt)}</td>
             <td><div className="row-actions">{user.mode === 'driver' &&
-              <IconButton label={`Revisar motorista ${user.name}`} onClick={() => { setReviewError(''); setReviewing(user); }} testId={`button-review-driver-${user.id}`}><ShieldCheck size={16} /></IconButton>}
+              <Button variant="secondary" onClick={() => { setReviewError(''); setReviewing(user); }} testId={`button-review-driver-${user.id}`}><ShieldCheck size={16} /> Revisar cadastro</Button>}
               <IconButton label={`Editar ${user.name}`} onClick={() => { setFormError(''); setEditing(user); }} testId={`button-edit-user-${user.id}`}><Settings2 size={16} /></IconButton>
               <IconButton label={`Excluir ${user.name}`} onClick={() => setRemoving(user)} testId={`button-delete-user-${user.id}`}><Trash2 size={16} /></IconButton></div></td>
           </tr>)}
@@ -421,6 +421,46 @@ function PricingPage({ notify }: { notify: (message: string, kind?: 'success' | 
   </main>;
 }
 
+function SettingsPage({ notify }: { notify: (message: string, kind?: 'success' | 'error') => void }) {
+  const client = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const [scope, setScope] = useState('rides');
+  const [clearPricing, setClearPricing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState('');
+  const changePassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const form = event.currentTarget; const data = new FormData(form);
+    if (data.get('newPassword') !== data.get('repeatPassword')) { setError('As novas senhas não coincidem.'); return; }
+    setBusy(true); setError('');
+    try { await adminRequest('/change-password', 'POST', { currentPassword: data.get('currentPassword'), newPassword: data.get('newPassword') }); form.reset(); notify('Senha alterada. As outras sessões foram encerradas.'); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Falha ao alterar senha.'); }
+    finally { setBusy(false); }
+  };
+  const reset = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault(); const data = new FormData(event.currentTarget); setBusy(true); setError('');
+    try { await adminRequest('/admin/reset-test-data', 'POST', { scope, clearPricing, currentPassword: data.get('currentPassword'), confirmation: data.get('confirmation') }); await client.invalidateQueries(); setConfirming(false); notify('Limpeza concluída.'); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível limpar.'); }
+    finally { setBusy(false); }
+  };
+  return <main className="page-enter"><div className="page-heading"><div><h1>Configurações</h1><p>Segurança da conta e preparação para o início da operação.</p></div></div>
+    <section className="content-panel settings-card"><h2>Alterar minha senha</h2><form className="form-stack" onSubmit={changePassword}>
+      <label>Senha atual<input name="currentPassword" type="password" autoComplete="current-password" required /></label>
+      <label>Nova senha<input name="newPassword" type="password" autoComplete="new-password" minLength={12} maxLength={128} required /></label>
+      <label>Confirmar nova senha<input name="repeatPassword" type="password" autoComplete="new-password" minLength={12} maxLength={128} required /></label>
+      <small>Use de 12 a 128 caracteres.</small><Button type="submit" disabled={busy} testId="button-change-password">Salvar nova senha</Button>
+    </form></section>
+    <section className="content-panel settings-card"><h2>Limpar dados de teste</h2><p>A exclusão é permanente. Faça uma cópia do banco antes de usar esta opção. As contas administrativas serão preservadas.</p>
+      <label>O que deseja limpar?<select value={scope} onChange={e => setScope(e.target.value)}><option value="rides">Corridas, mensagens e avaliações — manter usuários</option><option value="all">Usuários, corridas, mensagens e avaliações — começar do zero</option></select></label>
+      <label className="reset-checkbox"><input type="checkbox" checked={clearPricing} onChange={e => setClearPricing(e.target.checked)} /> Apagar também todas as tarifas</label>
+      <Button variant="danger" disabled={busy} onClick={() => { setError(''); setConfirming(true); }} testId="button-open-reset">Revisar limpeza</Button>
+    </section>{error && !confirming && <div className="form-alert" role="alert">{error}</div>}
+    {confirming && <Dialog title="Confirmar limpeza permanente" subtitle="Esta ação não pode ser desfeita." onClose={() => { if (!busy) setConfirming(false); }}>
+      <p>{scope === 'all' ? 'Excluir todos os clientes e motoristas, incluindo contas ocultas, suas sessões, corridas, mensagens e avaliações.' : 'Excluir todas as corridas, mensagens e avaliações. Manter os cadastros de usuários.'}</p><p>{clearPricing ? 'Todas as tarifas também serão excluídas.' : 'As tarifas serão preservadas.'} As contas administrativas serão mantidas.</p>
+      <form className="form-stack" onSubmit={reset}><label>Sua senha atual<input name="currentPassword" type="password" autoComplete="current-password" required /></label><label>Digite LIMPAR DADOS<input name="confirmation" autoComplete="off" pattern="LIMPAR DADOS" required /></label>{error && <div className="form-alert" role="alert">{error}</div>}<div className="dialog-actions"><Button variant="secondary" onClick={() => setConfirming(false)} disabled={busy} testId="button-cancel-reset">Cancelar</Button><Button type="submit" variant="danger" disabled={busy} testId="button-confirm-reset">{busy ? 'Limpando…' : 'Excluir os dados selecionados'}</Button></div></form>
+    </Dialog>}
+  </main>;
+}
+
 function SignIn({ onSignedIn, authNotice }: { onSignedIn: (user: User, token: string) => void; authNotice: string }) {
   const login = useLoginUser();
   const [error, setError] = useState('');
@@ -449,12 +489,23 @@ function SignIn({ onSignedIn, authNotice }: { onSignedIn: (user: User, token: st
 function AdminShell({ user, onLogout, notify }: { user: User; onLogout: () => void; notify: (message: string, kind?: 'success' | 'error') => void }) {
   const [path, setPath] = useLocation();
   const [mobileNav, setMobileNav] = useState(false);
+  const pendingQuery = useListUsers({ query: { queryKey: getListUsersQueryKey(), refetchInterval: AUTO_REFRESH_MS, refetchOnWindowFocus: true } });
+  const pending = ((pendingQuery.data ?? []) as DriverUser[]).filter(u => u.mode === 'driver' && u.approvalStatus === 'pending');
+  const previousPending = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!pendingQuery.data) return;
+    const current = new Set(pending.map(u => u.id));
+    if (previousPending.current && pending.some(u => !previousPending.current!.has(u.id))) notify('Há novos cadastros de motoristas para verificar. Abra Aprovações.');
+    previousPending.current = current;
+  }, [pendingQuery.data, notify]);
   const logout = useLogoutUser();
   const logoutNow = () => {
     logout.mutate(undefined, { onSettled: onLogout });
   };
   const links: { href: string; label: string; icon: ReactNode; page: PageName }[] = [
     { href: '/', label: 'Visão geral', icon: <LayoutDashboard size={17} />, page: 'overview' },
+    { href: '/approvals', label: `Aprovações (${pending.length})`, icon: <ShieldCheck size={17} />, page: 'approvals' },
+    { href: '/settings', label: 'Configurações', icon: <Settings2 size={17} />, page: 'settings' },
     { href: '/users', label: 'Usuários', icon: <UsersRound size={17} />, page: 'users' },
     { href: '/rides', label: 'Corridas', icon: <MapPin size={17} />, page: 'rides' },
     { href: '/pricing', label: 'Preços', icon: <Tag size={17} />, page: 'pricing' },
@@ -474,11 +525,13 @@ function AdminShell({ user, onLogout, notify }: { user: User; onLogout: () => vo
       </div>
     </aside>
     <div className="app-main"><header className="topbar"><button className="mobile-menu" onClick={() => setMobileNav(true)} aria-label="Abrir navegação" data-testid="button-open-mobile-nav"><Menu size={20} /></button><div className="breadcrumb"><span>KD TAXI</span><ArrowRight size={13} /><b>{pageTitle}</b></div><div className="topbar-right"><span className="topbar-operator"><span className="live-dot" /> Operação conectada</span><span className="topbar-avatar">{initials(user.name)}</span></div></header>
-      <div className="page-container"><Switch>
-        <Route path="/" component={() => <Dashboard goRides={() => setPath('/rides')} />} />
-        <Route path="/users" component={() => <UserPage notify={notify} />} />
+      <div className="page-container">{pending.length > 0 && <Link href="/approvals" className="approval-banner" role="status"><ShieldCheck size={20} /><span><strong>{pending.length} motorista(s) aguardando aprovação</strong><small>Abra para revisar os cadastros e veículos.</small></span><ArrowRight size={18} /></Link>}<Switch>
+        <Route path="/"><Dashboard goRides={() => setPath('/rides')} /></Route>
+        <Route path="/approvals"><UserPage notify={notify} approvalsOnly /></Route>
+        <Route path="/settings"><SettingsPage notify={notify} /></Route>
+        <Route path="/users"><UserPage notify={notify} /></Route>
         <Route path="/rides" component={RidesPage} />
-        <Route path="/pricing" component={() => <PricingPage notify={notify} />} />
+        <Route path="/pricing"><PricingPage notify={notify} /></Route>
         <Route component={NotFound} />
       </Switch>
         <div className="app-footer"><span>© KD TAXI · Administração</span><span>Operação com clareza.</span></div>

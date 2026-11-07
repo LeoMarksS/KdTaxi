@@ -103,3 +103,8 @@
 @media(max-width:380px) {
   .page-container { padding-left:11px; padding-right:11px; }.page-heading h1 { font-size:24px; }.page-heading>.button { font-size:8px; padding:0 7px; }.stat-card { padding:11px 9px; }.stat-value { font-size:18px; }.stat-bottom { font-size:7px; }.pricing-intro { gap:8px; }.price-total { display:none; }
 }
+
+.approval-banner { display:flex; align-items:center; gap:14px; padding:18px 22px; margin-bottom:24px; background:#fff4cc; border:1px solid #e5b531; border-radius:14px; color:#493500; text-decoration:none; }
+.approval-banner span { flex:1; } .approval-banner small { display:block; margin-top:4px; }
+.settings-card { padding:24px; margin-bottom:24px; } .settings-card h2 { margin-bottom:14px; } .settings-card p { margin-bottom:18px; } .settings-card .form-stack { max-width:480px; }
+.settings-card label { display:flex; flex-direction:column; gap:8px; margin:16px 0; } .settings-card select { padding:12px; max-width:100%; } .settings-card .reset-checkbox { flex-direction:row; align-items:center; } .reset-checkbox input { width:auto; }

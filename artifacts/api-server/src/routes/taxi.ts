@@ -7,6 +7,8 @@ import { db, users as dbUsers, sessions as dbSessions, rides as dbRides, chatMes
 import { and, asc, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import type { Server as SocketIOServer } from "socket.io";
 
+import { clearTestData } from "../lib/clear-test-data";
+
 const router = Router();
 
 let socketServer: SocketIOServer | undefined;
@@ -699,7 +701,7 @@ router.post("/change-password", requireAuth, changePasswordLimiter, async (req: 
     }
 
     if (typeof newPassword !== "string" || newPassword.length < 12 || newPassword.length > 128) {
-      res.status(400).json({ error: "A nova senha deve ter entre 8 e 128 caracteres." });
+      res.status(400).json({ error: "A nova senha deve ter entre 12 e 128 caracteres." });
       return;
     }
 
@@ -1065,7 +1067,7 @@ router.put("/admin/users/:id", requireAdmin, async (req: Request, res: Response)
     ? "approved" : vehicleChanged ? "pending" : user.approvalStatus;
   if (password !== undefined &&
       (typeof password !== "string" || password.length < 8 || password.length > 128)) {
-    res.status(400).json({ error: "A nova senha deve ter entre 8 e 128 caracteres." });
+    res.status(400).json({ error: "A nova senha deve ter entre 12 e 128 caracteres." });
     return;
   }
 
@@ -1189,16 +1191,41 @@ router.delete("/admin/users/:id", requireAdmin, async (req: Request, res: Respon
   }
 });
 
-// DELETE /admin/rides – exclui todas as corridas do Neon.
-router.delete("/admin/rides", requireAdmin, async (_req: Request, res: Response) => {
+// The legacy deletion endpoint cannot bypass password and confirmation safeguards.
+router.delete("/admin/rides", requireAdmin, (_req: Request, res: Response) => {
+  res.status(409).json({ error: "Use Configurações > Limpar dados de teste, com senha e confirmação." });
+});
+
+const resetDataLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5 });
+router.post("/admin/reset-test-data", requireAdmin, resetDataLimiter, async (req: Request, res: Response) => {
+  const { scope, clearPricing, confirmation, currentPassword } = req.body ?? {};
+  if (!['rides', 'all'].includes(scope) || typeof clearPricing !== 'boolean' || confirmation !== 'LIMPAR DADOS' || typeof currentPassword !== 'string' || currentPassword.length > 128) {
+    res.status(400).json({ error: "Confira a seleção e digite LIMPAR DADOS para confirmar." }); return;
+  }
   try {
-    await db.delete(dbRides);
-    rides.clear();
-    chatByRide.clear();
+    const adminId = req.authUser!.id;
+    const [admin] = await db.select().from(dbUsers).where(eq(dbUsers.id, adminId)).limit(1);
+    if (!admin?.active || admin.deletedAt || admin.mode !== 'admin' || !(await bcrypt.compare(currentPassword, admin.passwordHash))) {
+      res.status(403).json({ error: "A senha atual está incorreta." }); return;
+    }
+    const removedIds = await clearTestData(scope, clearPricing);
+    rides.clear(); chatByRide.clear();
+    for (const user of users.values()) { user.rating = 0; user.rideCount = 0; }
+    for (const id of removedIds) users.delete(id);
+    const removed = new Set(removedIds);
+    for (const [token, session] of sessions) if (removed.has(session.userId)) sessions.delete(token);
+    if (clearPricing) pricing.clear();
+    // Revoked sessions also block reconnection, even if an individual disconnect fails.
+    for (const id of removedIds) {
+      try { socketServer?.in(`user:${id}`).disconnectSockets(true); } catch { /* Session already revoked. */ }
+    }
     res.json({ ok: true });
   } catch (error) {
-    console.error("[admin] Erro ao excluir corridas:", error);
-    res.status(500).json({ error: "Não foi possível excluir as corridas" });
+    if (error instanceof Error && error.message === 'ACTIVE_RIDES') {
+      res.status(409).json({ error: "Finalize ou cancele as corridas aceitas ou em andamento antes da limpeza." }); return;
+    }
+    console.error('[admin] Falha na limpeza de dados de teste.');
+    res.status(500).json({ error: "A limpeza não foi concluída. Tente novamente." });
   }
 });
 
