@@ -108,3 +108,5 @@
 .approval-banner span { flex:1; } .approval-banner small { display:block; margin-top:4px; }
 .settings-card { padding:24px; margin-bottom:24px; } .settings-card h2 { margin-bottom:14px; } .settings-card p { margin-bottom:18px; } .settings-card .form-stack { max-width:480px; }
 .settings-card label { display:flex; flex-direction:column; gap:8px; margin:16px 0; } .settings-card select { padding:12px; max-width:100%; } .settings-card .reset-checkbox { flex-direction:row; align-items:center; } .reset-checkbox input { width:auto; }
+
+.finance-summary { flex-wrap:wrap; } .finance-summary > div { flex:1; min-width:150px; }

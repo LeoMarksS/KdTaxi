@@ -1,6 +1,7 @@
 import {
   pgTable,
   varchar,
+  uuid,
   text,
   boolean,
   integer,
@@ -150,3 +151,27 @@ export type ChatMessageRecord = typeof chatMessages.$inferSelect;
 export type NewChatMessageRecord = typeof chatMessages.$inferInsert;
 export type SessionRecord = typeof sessions.$inferSelect;
 export type PricingRuleRecord = typeof pricingRules.$inferSelect;
+
+// Taxa adicionada à tarifa base; desativada por padrão no lançamento.
+export const platformFeeSettings = pgTable('platform_fee_settings', {
+  id: integer('id').primaryKey(), enabled: boolean('enabled').notNull().default(false),
+  rateBps: integer('rate_bps').notNull().default(833),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [check('platform_fee_settings_id_check', sql`${t.id}=1`), check('platform_fee_settings_rate_bps_check', sql`${t.rateBps} BETWEEN 0 AND 10000`)]);
+export const rideFinancials = pgTable('ride_financials', {
+  rideId: varchar('ride_id', { length: 100 }).primaryKey().references(() => rides.id, { onDelete: 'cascade' }),
+  baseCents: bigint('base_cents', { mode: 'number' }).notNull(),
+  feeCents: bigint('fee_cents', { mode: 'number' }).notNull(), rateBps: integer('rate_bps').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [check('ride_financials_base_cents_check', sql`${t.baseCents}>=0`),check('ride_financials_fee_cents_check', sql`${t.feeCents}>=0`),check('ride_financials_rate_bps_check', sql`${t.rateBps} BETWEEN 0 AND 10000`)]);
+export const driverSettlements = pgTable('driver_settlements', {
+  id: uuid('id').primaryKey(), driverId: varchar('driver_id', { length: 100 }).notNull().references(() => users.id, { onDelete: 'restrict' }),
+  amountCents: bigint('amount_cents', { mode: 'number' }).notNull(), note: varchar('note', { length: 300 }).notNull().default(''),
+  adminId: varchar('admin_id', { length: 100 }).notNull().references(() => users.id, { onDelete: 'restrict' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  voidedAt: timestamp('voided_at', { withTimezone: true }), voidedBy: varchar('voided_by', { length: 100 }).references(() => users.id), voidReason: varchar('void_reason', { length: 300 }),
+}, t => [index('driver_settlements_driver_idx').on(t.driverId),check('driver_settlements_amount_cents_check', sql`${t.amountCents}>0`)]);
+export const platformFeeAudit = pgTable('platform_fee_audit', {
+  id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(), adminId: varchar('admin_id', { length: 100 }).notNull(),
+  enabled: boolean('enabled').notNull(), rateBps: integer('rate_bps').notNull(), createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});

@@ -10,12 +10,14 @@
     "apk:preview": "node scripts/build-preview.mjs",
     "test:api-contract": "pnpm --filter @workspace/api-server exec node --import tsx --test ../../lib/api-client-react/tests/admin-routes.test.ts",
     "test:admin-maintenance": "pnpm --filter @workspace/api-server exec node --import tsx --test tests/clear-test-data.test.ts",
-    "test:security": "pnpm --filter @workspace/api-server exec node --import tsx --test tests/security.test.ts tests/security-http.test.ts tests/socket-integration.test.ts"
+    "test:security": "pnpm --filter @workspace/api-server exec node --import tsx --test tests/security.test.ts tests/security-http.test.ts tests/socket-integration.test.ts",
+    "test:finance": "pnpm --filter @workspace/api-server exec node --import tsx --test tests/commission.test.ts tests/commission-db.test.ts tests/finance-http.test.ts"
   },
   "private": true,
   "devDependencies": {
     "typescript": "~5.9.2",
-    "prettier": "^3.8.1"
+    "prettier": "^3.8.1",
+    "@electric-sql/pglite": "^0.5.15"
   },
   "packageManager": "pnpm@10.26.1"
 }

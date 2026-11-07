@@ -4,10 +4,13 @@ import type { NextFunction, Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { db, users as dbUsers, sessions as dbSessions, rides as dbRides, chatMessages as dbChatMessages, pricingRules as dbPricingRules } from "@workspace/db";
-import { and, asc, eq, inArray, isNull, lt, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Server as SocketIOServer } from "socket.io";
 
 import { clearTestData } from "../lib/clear-test-data";
+
+import { calculateCommission, getFeeSettings, driverBalance } from "../lib/commission";
+import { addFinanceRoutes } from "../lib/finance-routes";
 
 const router = Router();
 
@@ -1177,7 +1180,8 @@ router.delete("/admin/users/:id", requireAdmin, async (req: Request, res: Respon
         or(eq(dbRides.clientId, id), eq(dbRides.driverId, id)),
         inArray(dbRides.status, ["waiting", "accepted", "in_progress"]),
       )).limit(1);
-      if (activeRide) return false;
+      if (activeRide) return "active";
+      if (await driverBalance(tx, id) > 0) return "balance";
       await tx.delete(dbSessions).where(eq(dbSessions.userId, id));
       await tx.update(dbUsers).set({
         deletedAt: new Date(), active: false, isOnline: false,
@@ -1186,10 +1190,10 @@ router.delete("/admin/users/:id", requireAdmin, async (req: Request, res: Respon
         photo: null, pushToken: null,
         vehicleBrand: null, vehicleModel: null, vehicleColor: null, vehiclePlate: null,
       }).where(eq(dbUsers.id, id));
-      return true;
+      return "ok";
     });
-    if (!removed) {
-      res.status(409).json({ error: "Finalize ou cancele as corridas ativas desta conta antes de excluí-la." });
+    if (removed !== "ok") {
+      res.status(409).json({ error: removed === "balance" ? "Registre o acerto do saldo devido ao KD TAXI antes de excluir esta conta." : "Finalize ou cancele as corridas ativas desta conta antes de excluí-la." });
       return;
     }
     for (const [token, session] of sessions.entries()) {
@@ -1446,6 +1450,9 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
     const created = await db.transaction(async (tx) => {
       const [account] = await tx.select().from(dbUsers).where(eq(dbUsers.id, clientId)).for("update");
       if (!account?.active || account.deletedAt) return false;
+      const settings = await getFeeSettings(tx, true);
+      const financial = calculateCommission(price, settings.rateBps, settings.enabled);
+      ride.price = financial.total;
       await tx.insert(dbRides).values({
       id: ride.id,
       clientId: ride.clientId,
@@ -1469,6 +1476,7 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
       acceptedAt: null,
       finishedAt: null,
     });
+      await tx.execute(sql`INSERT INTO ride_financials(ride_id,base_cents,fee_cents,rate_bps) VALUES(${ride.id},${financial.baseCents},${financial.feeCents},${financial.rateBps})`);
       return true;
     });
     if (!created) { res.status(403).json({ error: "Conta indisponível" }); return; }
@@ -2104,12 +2112,18 @@ router.get("/pricing/lookup", requireAuth, async (req: Request, res: Response) =
   }
 
   const result = await lookupPrice(destination, vehicleType);
+  const settings = await getFeeSettings();
+  const quote = result ? calculateCommission(result.price, settings.rateBps, settings.enabled) : undefined;
   res.set("Cache-Control", "no-store");
   res.json({
-    price: result?.price ?? null,
+    price: quote?.total ?? null,
+    basePrice: result?.price ?? null,
+    platformFee: quote ? quote.feeCents / 100 : null,
     isLocal: result?.isLocal ?? false,
     vehicleType,
   });
 });
+
+addFinanceRoutes(router, requireAdmin);
 
 export default router;
