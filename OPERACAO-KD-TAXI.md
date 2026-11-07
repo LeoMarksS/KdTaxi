@@ -40,3 +40,12 @@ Antes da primeira publicação desta revisão, executar `lib/db/scripts/add-acco
 - No painel, excluir uma conta de teste sem corrida ativa e conferir a preservação do histórico.
 
 A geração do APK e os testes automáticos não substituem essas verificações em aparelhos reais.
+
+## Preparação dos dados e aprovações no painel Web
+
+- Aprovações reúne motoristas com situação pendente, incluindo alterações de veículo. A navegação mostra a quantidade e todas as páginas exibem um aviso enquanto houver pendências. Novos IDs pendentes geram um aviso no painel aberto, conferidos a cada minuto e ao retornar à janela; não é uma notificação push com o navegador fechado.
+- Configurações permite alterar a própria senha, informando a atual e repetindo a nova (12–128 caracteres). Outras sessões da conta são revogadas.
+- A limpeza não ocorre automaticamente. Faça um backup do Neon antes de usar. Selecione corridas ou todos os dados de teste; tarifas são preservadas por padrão e podem ser incluídas explicitamente. Administradores são sempre preservados.
+- A limpeza exige a senha atual e a frase LIMPAR DADOS, é limitada a cinco tentativas a cada 15 minutos e fica bloqueada com corridas aceitas/em andamento. A exclusão é permanente e transacional, incluindo mensagens e avaliações. No modo completo, clientes e motoristas (inclusive ocultos) são excluídos fisicamente e suas sessões são revogadas. A exclusão individual continua preservando o histórico.
+- A rota antiga DELETE /admin/rides não permite contornar a confirmação.
+- Validação manual: verificar a área de aprovações com motorista pendente; revisar, aprovar e ver o contador baixar; verificar nova pendência; alterar senha com divergência e senha atual errada; testar limpeza apenas em banco descartável com usuários, sessões, corridas e chats; conferir tarifas preservadas por padrão e todas as contas administrativas mantidas. Nunca executar limpeza no banco compartilhado apenas para validar a interface.
