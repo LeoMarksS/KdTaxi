@@ -62,8 +62,8 @@ catalog:
   tailwind-merge: ^3.3.1
   tailwindcss: ^4.1.14
   tsx: ^4.21.0
-  vite: ^7.3.6
-  zod: ^3.25.76
+  vite: ^7.3.7
+  zod: ^4.6.7
 
 autoInstallPeers: false
 
@@ -146,23 +146,37 @@ overrides:
   "@expo/ngrok-bin>@expo/ngrok-bin-win32-x64": "-"
   # drizzle-kit uses esbuild internally on an older version that's vulnerable, this overrides it
   "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0"
-  esbuild: "0.27.3"
+  esbuild: "0.28.2"
   # Security: pin transitive dependency versions to patched releases
   lodash: ">=4.18.0"
   path-to-regexp: ">=8.4.0"
   # GHSA-2v35, GHSA-f6ww, GHSA-j759, GHSA-x6wf: XML injection / DoS via comment, PI, doctype, recursion
-  "@xmldom/xmldom": "0.8.13"
+  "@xmldom/xmldom": "0.8.15"
   # GHSA-q3j6, GHSA-v39h: path traversal and host confusion via percent-encoded segments
-  fast-uri: "3.1.2"
+  fast-uri: "3.1.9"
   # GHSA-48c2: stack overflow via deeply nested YAML collections
   yaml: "2.8.3"
   # GHSA-qx2v: XSS via unescaped </style> in CSS stringify output
-  postcss: "8.5.10"
+  postcss: "8.5.32"
   # GHSA-f886: zero-step sequence causes process hang / memory exhaustion (brace-expansion 2.x)
   brace-expansion: "2.1.0"
   # GHSA-jxxr: large numeric range defeats max DoS protection (brace-expansion 5.x via minimatch)
-  "minimatch>brace-expansion": "5.0.6"
+  "minimatch>brace-expansion": "5.0.12"
   # GHSA-58qx: uninitialized memory disclosure
-  ws: "8.20.1"
+  ws: "8.22.1"
   # GHSA-w5hq: predictable UUID generation (consumers are Expo dev-tool packages only)
   uuid: "9.0.1"
+  engine.io: "6.6.11"
+  socket.io-parser: "4.2.7"
+  ip-address: "10.7.6"
+  shell-quote: "1.12.0"
+  "js-yaml@^4": "4.3.2"
+  browserslist: "4.29.5"
+  baseline-browser-mapping: "2.11.35"
+  source-map-js: "1.2.2"
+  compression: "1.8.2"
+  node-forge: "1.4.3"
+  markdown-it: "14.3.3"
+  linkify-it: "5.0.2"
+  fast-copy: "4.3.1"
+  "postcss-selector-parser@^6": "6.1.5"

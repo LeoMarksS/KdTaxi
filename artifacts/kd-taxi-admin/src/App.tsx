@@ -445,9 +445,9 @@ function SettingsPage({ notify }: { notify: (message: string, kind?: 'success' |
   return <main className="page-enter"><div className="page-heading"><div><h1>Configurações</h1><p>Segurança da conta e preparação para o início da operação.</p></div></div>
     <section className="content-panel settings-card"><h2>Alterar minha senha</h2><form className="form-stack" onSubmit={changePassword}>
       <label>Senha atual<input name="currentPassword" type="password" autoComplete="current-password" required /></label>
-      <label>Nova senha<input name="newPassword" type="password" autoComplete="new-password" minLength={12} maxLength={128} required /></label>
-      <label>Confirmar nova senha<input name="repeatPassword" type="password" autoComplete="new-password" minLength={12} maxLength={128} required /></label>
-      <small>Use de 12 a 128 caracteres.</small><Button type="submit" disabled={busy} testId="button-change-password">Salvar nova senha</Button>
+      <label>Nova senha<input name="newPassword" type="password" autoComplete="new-password" minLength={12} maxLength={72} required /></label>
+      <label>Confirmar nova senha<input name="repeatPassword" type="password" autoComplete="new-password" minLength={12} maxLength={72} required /></label>
+      <small>Use pelo menos 12 caracteres. Acentos e emojis reduzem o tamanho máximo permitido.</small><Button type="submit" disabled={busy} testId="button-change-password">Salvar nova senha</Button>
     </form></section>
     <section className="content-panel settings-card"><h2>Limpar dados de teste</h2><p>A exclusão é permanente. Faça uma cópia do banco antes de usar esta opção. As contas administrativas serão preservadas.</p>
       <label>O que deseja limpar?<select value={scope} onChange={e => setScope(e.target.value)}><option value="rides">Corridas, mensagens e avaliações — manter usuários</option><option value="all">Usuários, corridas, mensagens e avaliações — começar do zero</option></select></label>
