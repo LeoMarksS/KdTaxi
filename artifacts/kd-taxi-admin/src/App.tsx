@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import logo from './assets/kd-taxi-icon.png';
 import NotFound from '@/pages/not-found';
+import FinancePage from './pages/Finance';
 
 function accountDeletionError(error: unknown): string {
   const data = error && typeof error === 'object' && 'data' in error ? error.data : null;
@@ -27,7 +28,7 @@ const TOKEN_KEY = 'kd-taxi-admin-token';
 const USER_KEY = 'kd-taxi-admin-user';
 setAuthTokenGetter(() => localStorage.getItem(TOKEN_KEY));
 
-type PageName = 'overview' | 'users' | 'rides' | 'pricing' | 'approvals' | 'settings';
+type PageName = 'overview' | 'users' | 'rides' | 'pricing' | 'approvals' | 'settings' | 'finance';
 type ToastState = { message: string; kind?: 'error' | 'success' } | null;
 type DriverUser = User & {
   vehicleBrand?: string; vehicleModel?: string; vehicleColor?: string; vehiclePlate?: string;
@@ -389,7 +390,7 @@ function PricingPage({ notify }: { notify: (message: string, kind?: 'success' | 
     deleteRule.mutate({ id: removing.id }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListPricingQueryKey() }); setRemoving(null); notify(wasLocal ? 'Preço local removido; destinos sem regra ficarão sem tarifa.' : 'Regra removida.'); }, onError: (error) => { if (isAuthError(error)) { raiseAuthExpired(); return; } notify('Não foi possível remover esta regra.', 'error'); } });
   };
   return <main className="page-enter">
-    <div className="page-heading"><div><div className="eyebrow">TARIFAS · {destinationRules.length.toLocaleString('pt-BR')} DESTINOS</div><h1>Preços</h1><p>Uma tarifa padrão local e valores específicos por destino.</p></div><Button onClick={() => { setFormError(''); setEditing({ id: '', destination: '', carPrice: null, motorcyclePrice: null, isLocal: false, createdAt: '' }); }} testId="button-add-price"><Plus size={16} /> Nova regra</Button></div>
+    <div className="page-heading"><div><div className="eyebrow">TARIFAS · {destinationRules.length.toLocaleString('pt-BR')} DESTINOS</div><h1>Preços</h1><p>Tarifas base do motorista. A taxa do KD TAXI é configurada em Financeiro e acrescentada ao total.</p></div><Button onClick={() => { setFormError(''); setEditing({ id: '', destination: '', carPrice: null, motorcyclePrice: null, isLocal: false, createdAt: '' }); }} testId="button-add-price"><Plus size={16} /> Nova regra</Button></div>
     <section className="pricing-intro"><span className="price-illustration"><Tag size={22} /></span><div><div className="eyebrow">TABELA DE TARIFAS</div><h2>Preço previsível, viagem tranquila.</h2><p>Destinos específicos têm prioridade sobre o preço fixo local.</p></div><div className="price-total"><small>DESTINOS CONFIGURADOS</small><b>{destinationRules.length.toString().padStart(2, '0')}</b></div></section>
     {query.isLoading && !query.data ? <div className="price-grid">{Array.from({ length: 4 }, (_, index) => <div className="price-card" key={index}><div className="skeleton sk-line" /><div className="skeleton sk-big" /></div>)}</div> : query.isError && !query.data ? <QueryError onRetry={() => void query.refetch()} /> : <>
       <section className="local-price-panel" data-testid="panel-local-price">
@@ -450,12 +451,12 @@ function SettingsPage({ notify }: { notify: (message: string, kind?: 'success' |
       <small>Use pelo menos 12 caracteres. Acentos e emojis reduzem o tamanho máximo permitido.</small><Button type="submit" disabled={busy} testId="button-change-password">Salvar nova senha</Button>
     </form></section>
     <section className="content-panel settings-card"><h2>Limpar dados de teste</h2><p>A exclusão é permanente. Faça uma cópia do banco antes de usar esta opção. As contas administrativas serão preservadas.</p>
-      <label>O que deseja limpar?<select value={scope} onChange={e => setScope(e.target.value)}><option value="rides">Corridas, mensagens e avaliações — manter usuários</option><option value="all">Usuários, corridas, mensagens e avaliações — começar do zero</option></select></label>
+      <label>O que deseja limpar?<select value={scope} onChange={e => setScope(e.target.value)}><option value="rides">Corridas, mensagens, avaliações e acertos — manter usuários</option><option value="all">Usuários, corridas, mensagens, avaliações e acertos — começar do zero</option></select></label>
       <label className="reset-checkbox"><input type="checkbox" checked={clearPricing} onChange={e => setClearPricing(e.target.checked)} /> Apagar também todas as tarifas</label>
       <Button variant="danger" disabled={busy} onClick={() => { setError(''); setConfirming(true); }} testId="button-open-reset">Revisar limpeza</Button>
     </section>{error && !confirming && <div className="form-alert" role="alert">{error}</div>}
     {confirming && <Dialog title="Confirmar limpeza permanente" subtitle="Esta ação não pode ser desfeita." onClose={() => { if (!busy) setConfirming(false); }}>
-      <p>{scope === 'all' ? 'Excluir todos os clientes e motoristas, incluindo contas ocultas, suas sessões, corridas, mensagens e avaliações.' : 'Excluir todas as corridas, mensagens e avaliações. Manter os cadastros de usuários.'}</p><p>{clearPricing ? 'Todas as tarifas também serão excluídas.' : 'As tarifas serão preservadas.'} As contas administrativas serão mantidas.</p>
+      <p>{scope === 'all' ? 'Excluir todos os clientes e motoristas, incluindo contas ocultas, suas sessões, corridas, mensagens, avaliações e acertos financeiros.' : 'Excluir todas as corridas, mensagens, avaliações e acertos financeiros. Manter os cadastros de usuários.'}</p><p>{clearPricing ? 'Todas as tarifas também serão excluídas.' : 'As tarifas serão preservadas.'} As contas administrativas serão mantidas.</p>
       <form className="form-stack" onSubmit={reset}><label>Sua senha atual<input name="currentPassword" type="password" autoComplete="current-password" required /></label><label>Digite LIMPAR DADOS<input name="confirmation" autoComplete="off" pattern="LIMPAR DADOS" required /></label>{error && <div className="form-alert" role="alert">{error}</div>}<div className="dialog-actions"><Button variant="secondary" onClick={() => setConfirming(false)} disabled={busy} testId="button-cancel-reset">Cancelar</Button><Button type="submit" variant="danger" disabled={busy} testId="button-confirm-reset">{busy ? 'Limpando…' : 'Excluir os dados selecionados'}</Button></div></form>
     </Dialog>}
   </main>;
@@ -508,6 +509,7 @@ function AdminShell({ user, onLogout, notify }: { user: User; onLogout: () => vo
     { href: '/settings', label: 'Configurações', icon: <Settings2 size={17} />, page: 'settings' },
     { href: '/users', label: 'Usuários', icon: <UsersRound size={17} />, page: 'users' },
     { href: '/rides', label: 'Corridas', icon: <MapPin size={17} />, page: 'rides' },
+    { href: '/finance', label: 'Financeiro', icon: <DollarSign size={17} />, page: 'finance' },
     { href: '/pricing', label: 'Preços', icon: <Tag size={17} />, page: 'pricing' },
   ];
   const selected = links.find((link) => link.href === path);
@@ -528,6 +530,7 @@ function AdminShell({ user, onLogout, notify }: { user: User; onLogout: () => vo
       <div className="page-container">{pending.length > 0 && <Link href="/approvals" className="approval-banner" role="status"><ShieldCheck size={20} /><span><strong>{pending.length} motorista(s) aguardando aprovação</strong><small>Abra para revisar os cadastros e veículos.</small></span><ArrowRight size={18} /></Link>}<Switch>
         <Route path="/"><Dashboard goRides={() => setPath('/rides')} /></Route>
         <Route path="/approvals"><UserPage notify={notify} approvalsOnly /></Route>
+        <Route path="/finance"><FinancePage notify={notify} /></Route>
         <Route path="/settings"><SettingsPage notify={notify} /></Route>
         <Route path="/users"><UserPage notify={notify} /></Route>
         <Route path="/rides" component={RidesPage} />

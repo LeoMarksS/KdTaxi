@@ -10,6 +10,7 @@ export async function clearTestData(scope: 'rides' | 'all', clearPricing: boolea
         .where(inArray(dbRides.status, ['accepted', 'in_progress'])).limit(1);
       if (active.length) throw new Error('ACTIVE_RIDES');
       const accounts = scope === 'all' ? await tx.select({ id: dbUsers.id }).from(dbUsers).where(ne(dbUsers.mode, 'admin')) : [];
+      await tx.execute(sql`DELETE FROM driver_settlements`);
       await tx.delete(dbChatMessages);
       await tx.delete(dbRides);
       await tx.update(dbUsers).set({ rating: 0, rideCount: 0 });

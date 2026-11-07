@@ -1,6 +1,7 @@
 import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import app from "./app";
+import { initializeFinance } from "./lib/commission";
 import { secureSocket, parseChatInput } from "./lib/socket-security";
 import { logger } from "./lib/logger";
 import {
@@ -143,7 +144,8 @@ io.on("connection", (socket) => {
   });
 });
 
-initializeAuthStore()
+initializeFinance()
+  .then(() => initializeAuthStore())
   .then(() => {
     httpServer.listen(port, (err?: Error) => {
       if (err) {
