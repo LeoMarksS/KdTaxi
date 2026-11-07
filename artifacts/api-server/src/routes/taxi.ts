@@ -234,8 +234,8 @@ export async function initializeAuthStore(): Promise<void> {
       );
     }
 
-    if (initialPassword.length < 12 || initialPassword.length > 128) {
-      throw new Error("ADMIN_INITIAL_PASSWORD deve ter entre 12 e 128 caracteres.");
+    if (initialPassword.length < 12 || Buffer.byteLength(initialPassword, "utf8") > 72) {
+      throw new Error("ADMIN_INITIAL_PASSWORD deve ter no mínimo 12 caracteres e no máximo 72 bytes.");
     }
 
     const now = new Date();
@@ -325,7 +325,7 @@ async function revokeOtherUserSessions(userId: string, keepToken?: string): Prom
 }
 
 async function getUserByToken(token: string | undefined): Promise<User | undefined> {
-  if (!token) return undefined;
+  if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) return undefined;
 
   const [session] = await db.select().from(dbSessions)
     .where(eq(dbSessions.token, token)).limit(1);
@@ -341,14 +341,12 @@ async function getUserByToken(token: string | undefined): Promise<User | undefin
     return undefined;
   }
 
-  let user = users.get(session.userId);
-  if (!user) {
-    const [record] = await db.select().from(dbUsers)
-      .where(eq(dbUsers.id, session.userId)).limit(1);
-    if (!record || record.deletedAt) return undefined;
-    user = userFromRecord(record);
-    users.set(user.id, user);
-  }
+  // Re-read account permissions so revocation is effective across sessions and restarts.
+  const [record] = await db.select().from(dbUsers)
+    .where(eq(dbUsers.id, session.userId)).limit(1);
+  if (!record || record.deletedAt) { users.delete(session.userId); return undefined; }
+  const user = userFromRecord(record);
+  users.set(user.id, user);
 
   if (!user.active) {
     await revokeOtherUserSessions(user.id);
@@ -611,7 +609,7 @@ router.post("/register", registerLimiter, async (req: Request, res: Response) =>
 
   const user: User = {
     id: getId(), name: name.trim(), phone: normalizedPhone,
-    passwordHash: bcrypt.hashSync(password, 10),
+    passwordHash: await bcrypt.hash(password, 10),
     mode,
     vehicleType: mode === "driver" && vehicleType === "motorcycle" ? "motorcycle" : mode === "driver" ? "car" : undefined,
     ...(vehicleDetails ?? {}),
@@ -652,7 +650,11 @@ router.post("/register", registerLimiter, async (req: Request, res: Response) =>
 });
 
 // POST /login – identifies the account (and its role) purely from phone + password
-router.post("/login", loginLimiter, async (req: Request, res: Response) => {
+const loginIpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, limit: 100, standardHeaders: true, legacyHeaders: false,
+  message: { error: "Muitas tentativas de acesso. Aguarde alguns minutos." },
+});
+router.post("/login", loginIpLimiter, loginLimiter, async (req: Request, res: Response) => {
   const { phone, password } = req.body as { phone?: string; password?: string };
 
   if (!phone?.trim() || !password) {
@@ -671,7 +673,7 @@ router.post("/login", loginLimiter, async (req: Request, res: Response) => {
       return;
     }
 
-    if (!record.active) {
+    if (!record.active || record.deletedAt) {
       res.status(403).json({ error: "Esta conta está desativada" });
       return;
     }
@@ -682,7 +684,7 @@ router.post("/login", loginLimiter, async (req: Request, res: Response) => {
     const token = await createSession(user.id);
     res.json({ user: safeUser(user), token });
   } catch (error) {
-    console.error("[auth] Erro ao realizar login:", error);
+    console.error("[auth] Erro ao realizar login:");
     res.status(500).json({ error: "Não foi possível realizar o login" });
   }
 });
@@ -738,7 +740,7 @@ router.post("/change-password", requireAuth, changePasswordLimiter, async (req: 
 
     res.json({ ok: true });
   } catch (error) {
-    console.error("[auth] Erro ao alterar senha:", error);
+    console.error("[auth] Erro ao alterar senha:");
     res.status(500).json({ error: "Não foi possível alterar a senha." });
   }
 });
@@ -755,10 +757,14 @@ router.post("/logout", requireAuth, async (req: Request, res: Response) => {
       if (token) await tx.delete(dbSessions).where(eq(dbSessions.token, token));
     });
     if (user.mode === "driver") user.isOnline = false;
-    if (token) sessions.delete(token);
+    if (token) {
+      sessions.delete(token);
+      const sockets = await socketServer?.in(`user:${user.id}`).fetchSockets();
+      for (const socket of sockets ?? []) if (socket.data.sessionToken === token) socket.disconnect(true);
+    }
     res.json({ ok: true });
   } catch (error) {
-    console.error("[auth] Erro ao encerrar sessão:", error);
+    console.error("[auth] Erro ao encerrar sessão:");
     res.status(500).json({ error: "Não foi possível encerrar a sessão" });
   }
 });
@@ -785,23 +791,36 @@ router.put("/users/:id", requireAuth, async (req: Request, res: Response) => {
   };
 
   const updatedName = name !== undefined ? name.trim() : user.name;
+  const identityChanged = user.mode === "driver" &&
+    (updatedName !== user.name || (photo !== undefined && photo !== user.photo));
 
   try {
-    await db.update(dbUsers)
-      .set({
+    const saved = await db.transaction(async tx => {
+      const [account] = await tx.select({ id: dbUsers.id }).from(dbUsers)
+        .where(eq(dbUsers.id, id)).for("update");
+      if (!account) return false;
+      if (identityChanged) {
+        const active = await tx.select({ id: dbRides.id }).from(dbRides)
+          .where(and(eq(dbRides.driverId, id), inArray(dbRides.status, ["accepted", "in_progress"]))).limit(1);
+        if (active.length) return false;
+      }
+      await tx.update(dbUsers).set({
         name: updatedName,
         ...(photo !== undefined ? { photo } : {}),
         ...(pushToken !== undefined ? { pushToken } : {}),
-      })
-      .where(eq(dbUsers.id, id));
-
+        ...(identityChanged ? { approvalStatus: "pending", isOnline: false } : {}),
+      }).where(eq(dbUsers.id, id));
+      return true;
+    });
+    if (!saved) { res.status(409).json({ error: "Finalize a corrida antes de alterar a identificação do motorista." }); return; }
     user.name = updatedName;
     if (photo !== undefined) user.photo = photo;
     if (pushToken !== undefined) user.pushToken = pushToken;
+    if (identityChanged) { user.approvalStatus = "pending"; user.isOnline = false; }
 
     res.json(safeUser(user));
   } catch (error) {
-    console.error("[profile] Erro ao atualizar perfil:", error);
+    console.error("[profile] Erro ao atualizar perfil:");
     res.status(500).json({ error: "Não foi possível atualizar o perfil" });
   }
 });
@@ -821,7 +840,7 @@ router.get("/users", requireAdmin, async (_req: Request, res: Response) => {
       .filter((u) => u.mode !== "admin")
       .map(safeUserList));
   } catch (error) {
-    console.error("[admin] Erro ao listar usuários:", error);
+    console.error("[admin] Erro ao listar usuários:");
     res.status(500).json({ error: "Não foi possível listar os usuários" });
   }
 });
@@ -851,7 +870,7 @@ router.get("/users/:id", requireAuth, async (req: Request, res: Response) => {
     users.set(user.id, user);
     res.json(safeUser(user));
   } catch (error) {
-    console.error("[profile] Erro ao consultar usuário:", error);
+    console.error("[profile] Erro ao consultar usuário:");
     res.status(500).json({ error: "Não foi possível consultar o usuário" });
   }
 });
@@ -888,7 +907,7 @@ router.post("/users/:id/availability", requireAuth, async (req: Request, res: Re
     user.isOnline = online;
     res.json({ isOnline: isDriverOnline(id) });
   } catch (error) {
-    console.error("[availability] Erro ao salvar disponibilidade:", error);
+    console.error("[availability] Erro ao salvar disponibilidade:");
     res.status(500).json({ error: "Não foi possível salvar a disponibilidade" });
   }
 });
@@ -928,7 +947,7 @@ router.put("/users/:id/vehicle", requireAuth, async (req: Request, res: Response
     }
     res.json(safeUser(user));
   } catch (error) {
-    console.error("[vehicle] Erro ao atualizar veículo:", error);
+    console.error("[vehicle] Erro ao atualizar veículo:");
     res.status(500).json({ error: "Não foi possível atualizar o veículo" });
   }
 });
@@ -987,7 +1006,7 @@ router.post("/users/:id/active", requireAuth, async (req: Request, res: Response
     if (!active) await revokeOtherUserSessions(id);
     res.json(safeUser(user));
   } catch (error) {
-    console.error("[profile] Erro ao alterar status da conta:", error);
+    console.error("[profile] Erro ao alterar status da conta:");
     res.status(500).json({ error: "Não foi possível alterar o status da conta" });
   }
 });
@@ -1017,7 +1036,7 @@ router.post("/admin/drivers/:id/approval", requireAdmin, async (req: Request, re
     user.isOnline = false;
     res.json(safeUser(user));
   } catch (error) {
-    console.error("[approval] Erro ao decidir aprovação:", error);
+    console.error("[approval] Erro ao decidir aprovação:");
     res.status(500).json({ error: "Não foi possível salvar a decisão" });
   }
 });
@@ -1067,7 +1086,7 @@ router.put("/admin/users/:id", requireAdmin, async (req: Request, res: Response)
     ? "approved" : vehicleChanged ? "pending" : user.approvalStatus;
   if (password !== undefined &&
       (typeof password !== "string" || password.length < 8 || password.length > 128)) {
-    res.status(400).json({ error: "A nova senha deve ter entre 12 e 128 caracteres." });
+    res.status(400).json({ error: "A nova senha deve ter entre 8 e 128 caracteres." });
     return;
   }
 
@@ -1130,7 +1149,7 @@ router.put("/admin/users/:id", requireAdmin, async (req: Request, res: Response)
       res.status(409).json({ error: "Telefone já cadastrado" });
       return;
     }
-    console.error("[admin] Erro ao atualizar usuário:", error);
+    console.error("[admin] Erro ao atualizar usuário:");
     res.status(500).json({ error: "Não foi possível atualizar o usuário" });
   }
 });
@@ -1186,7 +1205,7 @@ router.delete("/admin/users/:id", requireAdmin, async (req: Request, res: Respon
     } catch { console.warn("[admin] Conta excluída; conexão antiga será recusada na próxima autenticação."); }
     res.json({ ok: true });
   } catch (error) {
-    console.error("[admin] Erro ao excluir usuário:", error);
+    console.error("[admin] Erro ao excluir usuário:");
     res.status(500).json({ error: "Não foi possível excluir o usuário" });
   }
 });
@@ -1267,7 +1286,7 @@ router.get("/admin/stats", requireAdmin, async (_req: Request, res: Response) =>
         Math.max(1, ratedUsers.length),
     });
   } catch (error) {
-    console.error("[admin] Erro ao consultar estatísticas:", error);
+    console.error("[admin] Erro ao consultar estatísticas:");
     res.status(500).json({ error: "Não foi possível consultar as estatísticas" });
   }
 });
@@ -1320,7 +1339,7 @@ router.post("/admin/users", requireAdmin, async (req: Request, res: Response) =>
     id: getId(),
     name: name.trim(),
     phone: normalizedPhone,
-    passwordHash: bcrypt.hashSync(password, 10),
+    passwordHash: await bcrypt.hash(password, 10),
     mode: resolvedMode,
     ...(resolvedMode === "driver"
       ? { vehicleType: (vehicleType as User["vehicleType"]) ?? "car" }
@@ -1358,7 +1377,7 @@ router.post("/admin/users", requireAdmin, async (req: Request, res: Response) =>
       return;
     }
 
-    console.error("[admin] Erro ao criar usuário:", error);
+    console.error("[admin] Erro ao criar usuário:");
     res.status(500).json({ error: "Não foi possível criar o usuário" });
   }
 });
@@ -1454,7 +1473,7 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
     });
     if (!created) { res.status(403).json({ error: "Conta indisponível" }); return; }
   } catch (error) {
-    console.error("[rides] Erro ao salvar nova corrida:", error);
+    console.error("[rides] Erro ao salvar nova corrida:");
     res.status(500).json({ error: "Não foi possível registrar a corrida" });
     return;
   }
@@ -1549,7 +1568,7 @@ router.post("/accept-ride", requireAuth, async (req: Request, res: Response) => 
       return;
     }
 
-    console.error("[rides] Erro ao aceitar corrida:", error);
+    console.error("[rides] Erro ao aceitar corrida:");
     res.status(500).json({ error: "Não foi possível aceitar a corrida" });
     return;
   }
@@ -1620,7 +1639,7 @@ router.post("/start-ride", requireAuth, async (req: Request, res: Response) => {
       return;
     }
   } catch (error) {
-    console.error("[rides] Erro ao iniciar corrida:", error);
+    console.error("[rides] Erro ao iniciar corrida:");
     res.status(500).json({ error: "Não foi possível iniciar a corrida" });
     return;
   }
@@ -1673,7 +1692,7 @@ router.post("/finish-ride", requireAuth, async (req: Request, res: Response) => 
       return;
     }
   } catch (error) {
-    console.error("[rides] Erro ao finalizar corrida:", error);
+    console.error("[rides] Erro ao finalizar corrida:");
     res.status(500).json({ error: "Não foi possível finalizar a corrida" });
     return;
   }
@@ -1728,7 +1747,7 @@ router.post("/cancel-ride", requireAuth, async (req: Request, res: Response) => 
       return;
     }
   } catch (error) {
-    console.error("[rides] Erro ao cancelar corrida:", error);
+    console.error("[rides] Erro ao cancelar corrida:");
     res.status(500).json({ error: "Não foi possível cancelar a corrida" });
     return;
   }
@@ -1784,7 +1803,7 @@ router.get("/rides/:id/chat", requireAuth, async (req: Request, res: Response) =
     chatByRide.set(rideId, history);
     res.json(history);
   } catch (error) {
-    console.error("[chat] Erro ao buscar histórico no Neon:", error);
+    console.error("[chat] Erro ao buscar histórico no Neon:");
     res.status(500).json({ error: "Não foi possível carregar o histórico do chat" });
   }
 });
@@ -1857,7 +1876,7 @@ router.post("/rides/:id/rate", requireAuth, async (req: Request, res: Response) 
       if (!updatedRide) return undefined;
 
       const [targetUser] = await tx.select().from(dbUsers)
-        .where(eq(dbUsers.id, targetId)).limit(1);
+        .where(eq(dbUsers.id, targetId)).for("update").limit(1);
 
       if (!targetUser) {
         throw new Error("Usuário avaliado não encontrado");
@@ -1887,7 +1906,7 @@ router.post("/rides/:id/rate", requireAuth, async (req: Request, res: Response) 
 
     res.json(rideForViewer(updatedRide, req.authUser!));
   } catch (error) {
-    console.error("[rides] Erro ao salvar avaliação no Neon:", error);
+    console.error("[rides] Erro ao salvar avaliação no Neon:");
     res.status(500).json({ error: "Não foi possível salvar a avaliação" });
   }
 });
@@ -1918,7 +1937,7 @@ router.get("/rides", requireAuth, async (req: Request, res: Response) => {
 
     res.json(visibleRides.map((ride) => rideForViewer(ride, req.authUser!)));
   } catch (error) {
-    console.error("[rides] Erro ao consultar corridas no Neon:", error);
+    console.error("[rides] Erro ao consultar corridas no Neon:");
     res.status(500).json({ error: "Não foi possível consultar as corridas" });
   }
 });
@@ -1944,7 +1963,7 @@ router.get("/users/:id/rides", requireAuth, async (req: Request, res: Response) 
 
     res.json(userRides.map((ride) => rideForViewer(ride, req.authUser!)));
   } catch (error) {
-    console.error("[rides] Erro ao consultar histórico no Neon:", error);
+    console.error("[rides] Erro ao consultar histórico no Neon:");
     res.status(500).json({ error: "Não foi possível consultar o histórico de corridas" });
   }
 });
@@ -1968,7 +1987,7 @@ router.get("/pricing", requireAuth, async (_req: Request, res: Response) => {
     for (const rule of rules) pricing.set(rule.id, rule);
     res.json(rules);
   } catch (error) {
-    console.error("[pricing] Erro ao consultar tarifas no Neon:", error);
+    console.error("[pricing] Erro ao consultar tarifas no Neon:");
     res.status(500).json({ error: "Não foi possível consultar as tarifas" });
   }
 });
@@ -1984,7 +2003,7 @@ router.post("/pricing", requireAdmin, async (req: Request, res: Response) => {
 
   const validPrice = (value: unknown) =>
     value === null ||
-    (typeof value === "number" && Number.isFinite(value) && value >= 0);
+    (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 99999999.99);
 
   if (
     typeof destination !== "string" ||
@@ -2054,7 +2073,7 @@ router.post("/pricing", requireAdmin, async (req: Request, res: Response) => {
     pricing.set(rule.id, rule);
     res.json(rule);
   } catch (error) {
-    console.error("[pricing] Erro ao salvar tarifa no Neon:", error);
+    console.error("[pricing] Erro ao salvar tarifa no Neon:");
     res.status(500).json({
       error: "Não foi possível salvar a tarifa. Verifique se o destino já está cadastrado."
     });
@@ -2069,7 +2088,7 @@ router.delete("/pricing/:id", requireAdmin, async (req: Request, res: Response) 
     pricing.delete(id);
     res.json({ ok: true });
   } catch (error) {
-    console.error("[pricing] Erro ao excluir tarifa no Neon:", error);
+    console.error("[pricing] Erro ao excluir tarifa no Neon:");
     res.status(500).json({ error: "Não foi possível excluir a tarifa" });
   }
 });

@@ -1,6 +1,7 @@
 import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import app from "./app";
+import { secureSocket, parseChatInput } from "./lib/socket-security";
 import { logger } from "./lib/logger";
 import {
   initializeAuthStore,
@@ -32,6 +33,8 @@ const httpServer = createServer(app);
 
 const io = new SocketIOServer(httpServer, {
   path: "/api/socket.io",
+  maxHttpBufferSize: 16 * 1024,
+  connectTimeout: 15_000,
   cors: {
     origin: "*",
     methods: ["GET", "POST"],
@@ -58,12 +61,20 @@ io.use(async (socket, next) => {
     socket.data.sessionToken = token;
     next();
   } catch (error) {
-    logger.error({ err: error }, "Falha ao validar sessão do Socket.IO");
+    logger.error("Falha ao validar sessão do Socket.IO");
     next(new Error("authentication_error"));
   }
 });
 
 io.on("connection", (socket) => {
+  secureSocket(socket, authenticateSocketToken);
+  socket.on("error", () => { /* Rejected packets do not reach event handlers. */ });
+  const sessionCheck = setInterval(() => {
+    void authenticateSocketToken(socket.data.sessionToken)
+      .then(current => { if (!current || current.id !== socket.data.user.id) socket.disconnect(true); })
+      .catch(() => socket.disconnect(true));
+  }, 60_000);
+  sessionCheck.unref();
   const user = socket.data.user as {
     id: string;
     mode: string;
@@ -91,9 +102,9 @@ io.on("connection", (socket) => {
   });
 
   socket.on("mensagem_chat", async (msg: Partial<ChatMessage>) => {
-    const rideId = msg?.rideId;
-    const text = (msg?.text ?? "").toString().trim();
-    if (!rideId || !text || text.length > 1000) return;
+    const input = parseChatInput(msg);
+    if (!input) return;
+    const { rideId, text } = input;
     if (!isRideParticipant(rideId, user.id)) return;
 
     // A identidade vem do socket autenticado, nunca dos dados enviados pelo aplicativo.
@@ -110,7 +121,7 @@ io.on("connection", (socket) => {
     try {
       await recordChatMessage(fullMsg);
     } catch (error) {
-      logger.error({ error, rideId }, "Failed to persist chat message");
+      logger.error({ rideId }, "Failed to persist chat message");
       return;
     }
 
@@ -119,12 +130,15 @@ io.on("connection", (socket) => {
     if (driverId) io.to(`user:${driverId}`).emit("mensagem_chat", fullMsg);
 
     const recipientId = user.id === clientId ? driverId : clientId;
-    if (recipientId && !(await isUserForeground(recipientId))) {
-      sendChatPushNotification(recipientId, fullMsg.senderName, rideId);
+    if (recipientId) {
+      try {
+        if (!(await isUserForeground(recipientId))) sendChatPushNotification(recipientId, fullMsg.senderName, rideId);
+      } catch { logger.warn("Falha ao verificar destinatário de notificação do chat"); }
     }
   });
 
   socket.on("disconnect", () => {
+    clearInterval(sessionCheck);
     logger.info({ socketId: socket.id, userId: user.id }, "Socket disconnected");
   });
 });
@@ -141,6 +155,6 @@ initializeAuthStore()
     });
   })
   .catch((error) => {
-    logger.error({ err: error }, "Falha ao inicializar autenticação no Neon");
+    logger.error("Falha ao inicializar autenticação no Neon");
     process.exit(1);
   });
