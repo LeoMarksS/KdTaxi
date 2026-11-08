@@ -68,10 +68,10 @@ io.use(async (socket, next) => {
 });
 
 io.on("connection", (socket) => {
-  secureSocket(socket, authenticateSocketToken);
+  secureSocket(socket, token => authenticateSocketToken(token, false));
   socket.on("error", () => { /* Rejected packets do not reach event handlers. */ });
   const sessionCheck = setInterval(() => {
-    void authenticateSocketToken(socket.data.sessionToken)
+    void authenticateSocketToken(socket.data.sessionToken, false)
       .then(current => { if (!current || current.id !== socket.data.user.id) socket.disconnect(true); })
       .catch(() => socket.disconnect(true));
   }, 60_000);
