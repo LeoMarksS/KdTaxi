@@ -10,6 +10,7 @@ import type { Server as SocketIOServer } from "socket.io";
 import { clearTestData } from "../lib/clear-test-data";
 
 import { calculateCommission, getFeeSettings, driverBalance } from "../lib/commission";
+import { addHistoryRoutes, recifeTodayStart } from "../lib/admin-history";
 import { addFinanceRoutes } from "../lib/finance-routes";
 
 const router = Router();
@@ -1256,17 +1257,16 @@ router.post("/admin/reset-test-data", requireAdmin, resetDataLimiter, async (req
 router.get("/admin/stats", requireAdmin, async (_req: Request, res: Response) => {
   try {
     const [rideRecords, userRecords] = await Promise.all([
-      db.select().from(dbRides),
-      db.select().from(dbUsers),
+      db.select({ status: dbRides.status, price: dbRides.price, createdAt: dbRides.createdAt }).from(dbRides),
+      db.select({ id: dbUsers.id, mode: dbUsers.mode, vehicleType: dbUsers.vehicleType, deletedAt: dbUsers.deletedAt, rating: dbUsers.rating, rideCount: dbUsers.rideCount }).from(dbUsers),
     ]);
 
-    const allRideList = rideRecords.map(rideFromRecord);
-    const allUserList = userRecords.filter((r) => !r.deletedAt).map(userFromRecord);
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    const allRideList = rideRecords;
+    const allUserList = userRecords.filter((r) => !r.deletedAt);
+    const todayStart = recifeTodayStart();
 
     const finishedRides = allRideList.filter((r) => r.status === "finished");
-    const todayRides = allRideList.filter((r) => new Date(r.createdAt) >= todayStart);
+    const todayRides = allRideList.filter((r) => r.createdAt >= todayStart);
     const todayFinished = todayRides.filter((r) => r.status === "finished");
     const totalRevenue = finishedRides.reduce((s, r) => s + (r.price ?? 0), 0);
     const todayRevenue = todayFinished.reduce((s, r) => s + (r.price ?? 0), 0);
@@ -1277,8 +1277,8 @@ router.get("/admin/stats", requireAdmin, async (_req: Request, res: Response) =>
       totalClients: allUserList.filter((u) => u.mode === "client").length,
       totalDrivers: allUserList.filter((u) => u.mode === "driver").length,
       onlineDrivers: allUserList.filter((u) => u.mode === "driver" && isDriverOnline(u.id)).length,
-      onlineCarDrivers: allUserList.filter((u) => u.mode === "driver" && isDriverOnline(u.id) && driverVehicleType(u) === "car").length,
-      onlineMotorcycleDrivers: allUserList.filter((u) => u.mode === "driver" && isDriverOnline(u.id) && driverVehicleType(u) === "motorcycle").length,
+      onlineCarDrivers: allUserList.filter((u) => u.mode === "driver" && isDriverOnline(u.id) && (u.vehicleType ?? "car") === "car").length,
+      onlineMotorcycleDrivers: allUserList.filter((u) => u.mode === "driver" && isDriverOnline(u.id) && (u.vehicleType ?? "car") === "motorcycle").length,
       totalRides: allRideList.length,
       finishedRides: finishedRides.length,
       cancelledRides: allRideList.filter((r) => r.status === "cancelled").length,
@@ -2125,5 +2125,6 @@ router.get("/pricing/lookup", requireAuth, async (req: Request, res: Response) =
 });
 
 addFinanceRoutes(router, requireAdmin);
+addHistoryRoutes(router, requireAdmin);
 
 export default router;

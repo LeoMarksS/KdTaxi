@@ -62,3 +62,13 @@ A geração do APK e os testes automáticos não substituem essas verificações
 - A limpeza de dados de teste também exclui acertos; corridas financeiras são removidas por cascata. Configuração da taxa e sua trilha são preservadas. Não usar essa limpeza depois de começar a operação real sem revisão e backup.
 - Antes de ativar: informar motoristas sobre o repasse, comunicar a taxa aos passageiros e repetir uma corrida completa de cada categoria. O APK atual consulta o preço total na API; a apresentação detalhada da taxa no aplicativo pode ser ampliada numa próxima versão.
 - Verificações: pnpm run test:finance (cálculos e PostgreSQL isolado com rotas HTTP reais, sem Neon); pnpm run test:security; tipos e builds. Testes cobrem lançamento gratuito, 8,33%, arredondamento, preservação de valores, cancelamentos, recebimentos parciais, anulação, envio repetido, excesso sobre saldo, senha incorreta e integridade do banco.
+
+## Histórico por data no painel Web
+
+A aba Histórico e o atalho Consultar dias anteriores na Visão geral permitem consultar hoje, ontem, últimos sete dias, mês atual ou um período personalizado de até 366 dias por consulta. A busca por passageiro, motorista ou trajeto aplica-se ao resumo, aos dias e à lista. Cada página lista até 25 corridas; dias sem movimento aparecem com zero.
+
+O resumo de hoje também usa a meia-noite de Recife, independente do fuso do servidor. A consulta de estatísticas deixa de buscar fotos, senhas e dados pessoais desnecessários. O agrupamento usa a data da solicitação no fuso America/Recife, incluindo o dia final inteiro. Os status mostrados são os atuais: uma corrida solicitada ontem e concluída hoje compõe o valor do dia da solicitação. O total financeiro dessa tela corresponde ao preço das corridas concluídas, não ao saldo de comissão da plataforma. Disponibilidade de motoristas continua sendo um dado atual; não se reconstrói presença histórica a partir dessas corridas.
+
+A rota GET /api/admin/history exige administrador. As consultas são limitadas ao período no banco, com índice de criação existente, sem fotos ou tokens e sem apagar dados. Resumo e paginação são lidos numa mesma transação consistente. Dados anteriormente excluídos pela limpeza não podem ser reconstruídos por este filtro. Nenhuma alteração nativa nem build novo é necessário.
+
+Verificação: pnpm run test:history testa datas inválidas, virada à meia-noite de Recife, canceladas fora do faturamento, dias zerados, busca parametrizada e paginação em PostgreSQL isolado.
