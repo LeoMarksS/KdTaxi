@@ -114,3 +114,15 @@ export async function scheduleLocalNotification(
     // Real-time in-app updates remain available when the runtime lacks local notifications.
   }
 }
+
+/** Clears delivered alerts and the home-screen badge; does not mark chat messages as read. */
+export async function clearPresentedNotifications() {
+  if (Platform.OS === "web" || isAndroidExpoGo()) return;
+  try {
+    const Notifications = await import("expo-notifications");
+    const { clearSystemNotifications } = await import("./notification-cleanup");
+    await clearSystemNotifications(Notifications);
+  } catch {
+    // Native notification support may be unavailable in a preview runtime.
+  }
+}

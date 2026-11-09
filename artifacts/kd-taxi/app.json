@@ -2,7 +2,7 @@
   "expo": {
     "name": "KD TAXI",
     "slug": "kd-taxi",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "kd-taxi",
@@ -13,12 +13,12 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Usado para foto do perfil.",
         "NSPhotoLibraryUsageDescription": "Usado para selecionar foto do perfil.",
-        "NSMicrophoneUsageDescription": "N\u00e3o utilizado."
+        "NSMicrophoneUsageDescription": "Não utilizado."
       }
     },
     "android": {
       "package": "com.kdtaxi.app",
-      "versionCode": 3,
+      "versionCode": 4,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#0D0D0D"
@@ -35,8 +35,8 @@
     },
     "web": {
       "favicon": "./assets/images/icon.png",
-      "title": "KD TAXI \u2014 Chame seu t\u00e1xi agora",
-      "description": "KD TAXI \u00e9 o aplicativo de transporte para sua cidade. Chame um motorista em segundos, acompanhe em tempo real e pague um pre\u00e7o justo.",
+      "title": "KD TAXI — Chame seu táxi agora",
+      "description": "KD TAXI é o aplicativo de transporte para sua cidade. Chame um motorista em segundos, acompanhe em tempo real e pague um preço justo.",
       "themeColor": "#0D0D0D",
       "backgroundColor": "#0D0D0D",
       "lang": "pt-BR"
@@ -72,8 +72,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Permitir acesso \u00e0s fotos para foto do perfil.",
-          "cameraPermission": "Permitir acesso \u00e0 c\u00e2mera para foto do perfil.",
+          "photosPermission": "Permitir acesso às fotos para foto do perfil.",
+          "cameraPermission": "Permitir acesso à câmera para foto do perfil.",
           "microphonePermission": false
         }
       ],
