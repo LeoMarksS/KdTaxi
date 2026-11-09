@@ -10,7 +10,7 @@ import React, {
 } from "react";
 import { io, Socket } from "socket.io-client";
 
-import { registerForPushNotifications, scheduleLocalNotification } from "@/lib/notifications";
+import { registerForPushNotifications, scheduleLocalNotification, clearPresentedNotifications } from "@/lib/notifications";
 
 export type UserMode = "client" | "driver" | "admin" | null;
 
@@ -561,6 +561,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [setUser, setToken]);
 
+  // Remove previously delivered alerts on launch/return, even while offline or logged out.
+  useEffect(() => {
+    if (Platform.OS === "web") return;
+    if (AppState.currentState === "active") void clearPresentedNotifications();
+    const subscription = AppState.addEventListener("change", state => {
+      if (state === "active") void clearPresentedNotifications();
+    });
+    return () => subscription.remove();
+  }, []);
+
   // Register push at login and retry when the app returns to foreground.
   useEffect(() => {
     if (!user?.id || !token || Platform.OS === "web") return;
@@ -989,6 +999,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [authFetch, markReadThrough]);
 
   const logout = useCallback(() => {
+    void clearPresentedNotifications();
     if (tokenRef.current) {
       authFetch(`/logout`, { method: "POST" }).catch(() => {});
     }
