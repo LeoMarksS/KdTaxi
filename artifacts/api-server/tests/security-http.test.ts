@@ -10,7 +10,7 @@ test('API real bloqueia acesso anônimo e entradas malformadas sem consultar o b
   const address = server.address(); assert(address && typeof address !== 'string');
   const base = `http://127.0.0.1:${address.port}/api`;
   try {
-    for (const path of ['/users', '/admin/stats', '/admin/finance', '/users/another-user', '/rides', '/rides/another-ride/chat', '/pricing']) {
+    for (const path of ['/users', '/admin/stats', '/admin/history?from=2026-11-08&to=2026-11-08', '/admin/finance', '/users/another-user', '/rides', '/rides/another-ride/chat', '/pricing']) {
       const res = await fetch(base + path, { headers: { Authorization: 'Bearer malformed' } });
       assert([401, 403].includes(res.status), path);
       assert.equal(res.headers.get('cache-control'), 'no-store');

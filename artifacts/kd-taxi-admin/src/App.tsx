@@ -17,6 +17,7 @@ import {
 import logo from './assets/kd-taxi-icon.png';
 import NotFound from '@/pages/not-found';
 import FinancePage from './pages/Finance';
+import HistoryPage from './pages/History';
 
 function accountDeletionError(error: unknown): string {
   const data = error && typeof error === 'object' && 'data' in error ? error.data : null;
@@ -28,7 +29,7 @@ const TOKEN_KEY = 'kd-taxi-admin-token';
 const USER_KEY = 'kd-taxi-admin-user';
 setAuthTokenGetter(() => localStorage.getItem(TOKEN_KEY));
 
-type PageName = 'overview' | 'users' | 'rides' | 'pricing' | 'approvals' | 'settings' | 'finance';
+type PageName = 'overview' | 'users' | 'rides' | 'pricing' | 'approvals' | 'settings' | 'finance' | 'history';
 type ToastState = { message: string; kind?: 'error' | 'success' } | null;
 type DriverUser = User & {
   vehicleBrand?: string; vehicleModel?: string; vehicleColor?: string; vehiclePlate?: string;
@@ -128,7 +129,7 @@ function Dashboard({ goRides }: { goRides: () => void }) {
   const refresh = () => { void statsQuery.refetch(); void ridesQuery.refetch(); };
   return <main className="page-enter">
     <div className="page-heading"><div><div className="eyebrow">CENTRAL DE OPERAÇÕES <span className="live-indicator">● AO VIVO</span></div><h1>Visão geral</h1><p>O pulso da operação, em um só lugar.</p></div>
-      <div className="heading-actions"><span className="updated-note"><span className="live-dot" /> Atualização automática · 1 min</span><Button variant="secondary" onClick={refresh} testId="button-refresh-overview"><RefreshCw size={15} /> Atualizar</Button></div></div>
+      <div className="heading-actions"><Link href="/history" className="button button-secondary">Consultar dias anteriores</Link><span className="updated-note"><span className="live-dot" /> Atualização automática · 1 min</span><Button variant="secondary" onClick={refresh} testId="button-refresh-overview"><RefreshCw size={15} /> Atualizar</Button></div></div>
     {statsQuery.isLoading ? <div className="stats-grid">{Array.from({ length: 6 }, (_, index) => <div className="stat-card stat-skeleton" key={index}><div className="skeleton sk-line" /><div className="skeleton sk-big" /><div className="skeleton sk-line short" /></div>)}</div> :
       statsQuery.isError && !stats ? <QueryError onRetry={() => void statsQuery.refetch()} /> : stats && <>
         <section className="stats-grid">
@@ -508,6 +509,7 @@ function AdminShell({ user, onLogout, notify }: { user: User; onLogout: () => vo
     { href: '/approvals', label: `Aprovações (${pending.length})`, icon: <ShieldCheck size={17} />, page: 'approvals' },
     { href: '/settings', label: 'Configurações', icon: <Settings2 size={17} />, page: 'settings' },
     { href: '/users', label: 'Usuários', icon: <UsersRound size={17} />, page: 'users' },
+    { href: '/history', label: 'Histórico', icon: <Activity size={17} />, page: 'history' },
     { href: '/rides', label: 'Corridas', icon: <MapPin size={17} />, page: 'rides' },
     { href: '/finance', label: 'Financeiro', icon: <DollarSign size={17} />, page: 'finance' },
     { href: '/pricing', label: 'Preços', icon: <Tag size={17} />, page: 'pricing' },
@@ -530,6 +532,7 @@ function AdminShell({ user, onLogout, notify }: { user: User; onLogout: () => vo
       <div className="page-container">{pending.length > 0 && <Link href="/approvals" className="approval-banner" role="status"><ShieldCheck size={20} /><span><strong>{pending.length} motorista(s) aguardando aprovação</strong><small>Abra para revisar os cadastros e veículos.</small></span><ArrowRight size={18} /></Link>}<Switch>
         <Route path="/"><Dashboard goRides={() => setPath('/rides')} /></Route>
         <Route path="/approvals"><UserPage notify={notify} approvalsOnly /></Route>
+        <Route path="/history"><HistoryPage /></Route>
         <Route path="/finance"><FinancePage notify={notify} /></Route>
         <Route path="/settings"><SettingsPage notify={notify} /></Route>
         <Route path="/users"><UserPage notify={notify} /></Route>
