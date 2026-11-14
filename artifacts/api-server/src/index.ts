@@ -1,6 +1,7 @@
 import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import app from "./app";
+import { initializeNightFares } from "./lib/night-fares";
 import { initializeFinance } from "./lib/commission";
 import { secureSocket, parseChatInput } from "./lib/socket-security";
 import { logger } from "./lib/logger";
@@ -145,6 +146,7 @@ io.on("connection", (socket) => {
 });
 
 initializeFinance()
+  .then(() => initializeNightFares())
   .then(() => initializeAuthStore())
   .then(() => {
     httpServer.listen(port, (err?: Error) => {

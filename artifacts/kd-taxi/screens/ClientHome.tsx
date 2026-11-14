@@ -60,7 +60,7 @@ export default function ClientHome() {
   const [payment, setPayment] = useState<"pix" | "dinheiro">("dinheiro");
   const [vehicleType, setVehicleType] = useState<VehicleType>("car");
   const [loading, setLoading] = useState(false);
-  const [priceResult, setPriceResult] = useState<{ price: number; isLocal: boolean } | null>(null);
+  const [priceResult, setPriceResult] = useState<{ price: number; isLocal: boolean; farePeriod?: "day" | "night" } | null>(null);
   const [priceLookingUp, setPriceLookingUp] = useState(false);
   const [confirmingCancel, setConfirmingCancel] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -149,8 +149,9 @@ export default function ClientHome() {
     setLoading(true);
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-      const ride = await requestRide(origin.trim(), destination.trim(), payment, vehicleType);
+      const ride = await requestRide(origin.trim(), destination.trim(), payment, vehicleType, priceResult.price);
       if (!ride) {
+        setPriceResult(await lookupPrice(destination.trim(), vehicleType));
         Alert.alert(
           "Não foi possível solicitar",
           "A tarifa pode ter sido alterada ou a conexão falhou. Consulte novamente antes de tentar.",
@@ -461,7 +462,7 @@ export default function ClientHome() {
                       </Text>
                       {priceResult?.isLocal && (
                         <Text style={[s.priceLabel, { fontSize: 10, color: colors.primary + "cc", marginTop: 1 }]}>
-                          Dentro da cidade
+                          {priceResult.farePeriod === "night" ? "Tarifa noturna local" : "Dentro da cidade"}
                         </Text>
                       )}
                     </View>

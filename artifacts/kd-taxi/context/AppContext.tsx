@@ -147,7 +147,7 @@ interface AppContextValue {
   markChatRead: (rideId: string) => void;
   fetchChatHistory: (rideId: string) => Promise<void>;
   socket: Socket | null;
-  requestRide: (origin: string, destination: string, payment: "pix" | "dinheiro", vehicleType?: VehicleType) => Promise<Ride | null>;
+  requestRide: (origin: string, destination: string, payment: "pix" | "dinheiro", vehicleType?: VehicleType, expectedPrice?: number) => Promise<Ride | null>;
   acceptRide: (rideId: string) => Promise<void>;
   declineRide: (rideId: string) => void;
   startRide: (rideId: string) => Promise<boolean>;
@@ -167,7 +167,7 @@ interface AppContextValue {
   refreshPricing: () => Promise<void>;
   setPricingRule: (destination: string, carPrice: number | null, motorcyclePrice: number | null, isLocal?: boolean) => Promise<void>;
   deletePricingRule: (id: string) => Promise<void>;
-  lookupPrice: (destination: string, vehicleType: VehicleType) => Promise<{ price: number; isLocal: boolean } | null>;
+  lookupPrice: (destination: string, vehicleType: VehicleType) => Promise<{ price: number; isLocal: boolean; farePeriod?: "day" | "night" } | null>;
   finishedRideToRate: Ride | null;
   clearFinishedRideToRate: () => void;
   // Admin operations
@@ -844,6 +844,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     destination: string,
     payment: "pix" | "dinheiro",
     vehicleType: VehicleType = "car",
+    expectedPrice?: number,
   ): Promise<Ride | null> => {
     if (!user) return null;
     const res = await authFetch(`/request-ride`, {
@@ -851,7 +852,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         clientId: user.id, clientName: user.name, clientPhone: user.phone,
-         clientPhoto: user.photo, origin, destination, payment, vehicleType,
+         clientPhoto: user.photo, origin, destination, payment, vehicleType, expectedPrice,
       }),
     });
     if (!res.ok) return null;
@@ -1061,7 +1062,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const lookupPrice = useCallback(async (
     destination: string,
     vehicleType: VehicleType,
-  ): Promise<{ price: number; isLocal: boolean } | null> => {
+  ): Promise<{ price: number; isLocal: boolean; farePeriod?: "day" | "night" } | null> => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
     try {
@@ -1076,7 +1077,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       const data = await res.json();
       if (typeof data.price === "number" && Number.isFinite(data.price) && data.price >= 0) {
-        return { price: data.price, isLocal: data.isLocal ?? false };
+        return { price: data.price, isLocal: data.isLocal ?? false, farePeriod: data.farePeriod };
       }
       return null;
     } catch {

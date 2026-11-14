@@ -17,6 +17,7 @@ import {
 import logo from './assets/kd-taxi-icon.png';
 import NotFound from '@/pages/not-found';
 import FinancePage from './pages/Finance';
+import NightFares from './components/NightFares';
 
 function accountDeletionError(error: unknown): string {
   const data = error && typeof error === 'object' && 'data' in error ? error.data : null;
@@ -397,6 +398,7 @@ function PricingPage({ notify }: { notify: (message: string, kind?: 'success' | 
   };
   return <main className="page-enter">
     <div className="page-heading"><div><div className="eyebrow">TARIFAS · {destinationRules.length.toLocaleString('pt-BR')} DESTINOS</div><h1>Preços</h1><p>Tarifas base do motorista. A taxa do KD TAXI é configurada em Financeiro e acrescentada ao total.</p></div><Button onClick={() => { setFormError(''); setEditing({ id: '', destination: '', carPrice: null, motorcyclePrice: null, isLocal: false, createdAt: '' }); }} testId="button-add-price"><Plus size={16} /> Nova regra</Button></div>
+    <NightFares notify={notify} />
     <section className="pricing-intro"><span className="price-illustration"><Tag size={22} /></span><div><div className="eyebrow">TABELA DE TARIFAS</div><h2>Preço previsível, viagem tranquila.</h2><p>Destinos específicos têm prioridade sobre o preço fixo local.</p></div><div className="price-total"><small>DESTINOS CONFIGURADOS</small><b>{destinationRules.length.toString().padStart(2, '0')}</b></div></section>
     {query.isLoading && !query.data ? <div className="price-grid">{Array.from({ length: 4 }, (_, index) => <div className="price-card" key={index}><div className="skeleton sk-line" /><div className="skeleton sk-big" /></div>)}</div> : query.isError && !query.data ? <QueryError onRetry={() => void query.refetch()} /> : <>
       <section className="local-price-panel" data-testid="panel-local-price">

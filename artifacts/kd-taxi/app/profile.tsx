@@ -2,6 +2,7 @@ import Constants from "expo-constants";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
+import { prepareProfilePhoto } from "@/utils/profilePhoto";
 import { router } from "expo-router";
 import React, { useState } from "react";
 import {
@@ -44,13 +45,13 @@ export default function ProfileScreen() {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.4,
-      base64: true,
     });
     const asset = !result.canceled ? result.assets[0] : undefined;
-    if (asset?.base64) {
-      const mime = asset.mimeType ?? "image/jpeg";
-      setPhoto(`data:${mime};base64,${asset.base64}`);
-      Haptics.selectionAsync();
+    if (asset) {
+      try {
+        setPhoto(await prepareProfilePhoto(asset));
+        Haptics.selectionAsync();
+      } catch { Alert.alert("Foto", "Não foi possível preparar a foto. Tente outra imagem."); }
     }
   };
 
@@ -64,13 +65,13 @@ export default function ProfileScreen() {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.4,
-      base64: true,
     });
     const asset = !result.canceled ? result.assets[0] : undefined;
-    if (asset?.base64) {
-      const mime = asset.mimeType ?? "image/jpeg";
-      setPhoto(`data:${mime};base64,${asset.base64}`);
-      Haptics.selectionAsync();
+    if (asset) {
+      try {
+        setPhoto(await prepareProfilePhoto(asset));
+        Haptics.selectionAsync();
+      } catch { Alert.alert("Foto", "Não foi possível preparar a foto. Tente outra imagem."); }
     }
   };
 

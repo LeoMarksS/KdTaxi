@@ -12,6 +12,8 @@ import { clearTestData } from "../lib/clear-test-data";
 import { calculateCommission, getFeeSettings, driverBalance } from "../lib/commission";
 import { addFinanceRoutes } from "../lib/finance-routes";
 
+import { getNightFares, isNightFare, saveNightFares, validNightFares } from "../lib/night-fares";
+
 const router = Router();
 
 let socketServer: SocketIOServer | undefined;
@@ -536,7 +538,8 @@ export function sendChatPushNotification(userId: string, senderName: string, rid
 async function lookupPrice(
   destination: string,
   vehicleType: "car" | "motorcycle",
-): Promise<{ price: number; isLocal: boolean } | undefined> {
+  at = new Date(),
+): Promise<{ price: number; isLocal: boolean; farePeriod?: "day" | "night" } | undefined> {
   const dest = destination.toLowerCase().trim();
   if (!dest) return undefined;
 
@@ -560,9 +563,13 @@ async function lookupPrice(
   const localRule = currentRules.find((rule) => rule.isLocal);
   if (!localRule) return undefined;
 
-  const price = vehiclePrice(localRule);
+  const night = await getNightFares();
+  const nighttime = isNightFare(night, at);
+  // An unset daytime vehicle fare remains unavailable at night too.
+  if (vehiclePrice(localRule) === null) return undefined;
+  const price = nighttime ? (vehicleType === 'motorcycle' ? night.motorcyclePrice : night.carPrice) : vehiclePrice(localRule);
   return typeof price === "number" && Number.isFinite(price)
-    ? { price, isLocal: true }
+    ? { price, isLocal: true, farePeriod: nighttime ? "night" : "day" }
     : undefined;
 }
 
@@ -1422,7 +1429,8 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
   const selectedVehicle: "car" | "motorcycle" =
     vehicleType === "motorcycle" ? "motorcycle" : "car";
 
-  const priceResult = await lookupPrice(destination, selectedVehicle);
+  const requestedAt = new Date();
+  const priceResult = await lookupPrice(destination, selectedVehicle, requestedAt);
 
   if (!priceResult) {
     const vehicleName = selectedVehicle === "motorcycle" ? "moto" : "carro";
@@ -1449,7 +1457,7 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
     price,
     payment: (payment as Ride["payment"]) ?? "dinheiro",
     status: "waiting",
-    createdAt: new Date().toISOString(),
+    createdAt: requestedAt.toISOString(),
   };
 
   try {
@@ -1458,6 +1466,9 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
       if (!account?.active || account.deletedAt) return false;
       const settings = await getFeeSettings(tx, true);
       const financial = calculateCommission(price, settings.rateBps, settings.enabled);
+      if (req.body.expectedPrice !== undefined &&
+          (typeof req.body.expectedPrice !== 'number' || !Number.isFinite(req.body.expectedPrice) ||
+           Math.round(req.body.expectedPrice * 100) !== Math.round(financial.total * 100))) return 'FARE_CHANGED';
       ride.price = financial.total;
       await tx.insert(dbRides).values({
       id: ride.id,
@@ -1485,6 +1496,10 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
       await tx.execute(sql`INSERT INTO ride_financials(ride_id,base_cents,fee_cents,rate_bps) VALUES(${ride.id},${financial.baseCents},${financial.feeCents},${financial.rateBps})`);
       return true;
     });
+    if (created === 'FARE_CHANGED') {
+      res.status(409).json({ error: 'A tarifa mudou. Confira o novo valor antes de confirmar.', code: 'FARE_CHANGED' });
+      return;
+    }
     if (!created) { res.status(403).json({ error: "Conta indisponível" }); return; }
   } catch (error) {
     console.error("[rides] Erro ao salvar nova corrida:");
@@ -1985,6 +2000,19 @@ router.get("/users/:id/rides", requireAuth, async (req: Request, res: Response) 
   }
 });
 
+// Local nightly fares are independent of intercity destination rules.
+router.get('/admin/night-fares', requireAdmin, async (_req: Request, res: Response) => {
+  res.json(await getNightFares());
+});
+router.put('/admin/night-fares', requireAdmin, async (req: Request, res: Response) => {
+  if (!validNightFares(req.body)) {
+    res.status(400).json({ error: 'Confira os horários, o fuso e os valores da tarifa noturna.' }); return;
+  }
+  const { enabled, start, end, timeZone, carPrice, motorcyclePrice } = req.body;
+  await saveNightFares({ enabled, start, end, timeZone, carPrice, motorcyclePrice }, req.authUser!.id);
+  res.json(await getNightFares());
+});
+
 // GET /pricing – consulta as tarifas persistidas no Neon.
 router.get("/pricing", requireAuth, async (_req: Request, res: Response) => {
   try {
@@ -2129,6 +2157,7 @@ router.get("/pricing/lookup", requireAuth, async (req: Request, res: Response) =
     basePrice: result?.price ?? null,
     platformFee: quote ? quote.feeCents / 100 : null,
     isLocal: result?.isLocal ?? false,
+    farePeriod: result?.farePeriod ?? "day",
     vehicleType,
   });
 });
