@@ -1274,8 +1274,7 @@ router.post("/admin/reset-test-data", requireAdmin, resetDataLimiter, async (req
 // GET /admin/stats – estatísticas calculadas diretamente do Neon.
 router.get("/admin/stats", requireAdmin, async (_req: Request, res: Response) => {
   try {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    const todayStart = recifeTodayStart();
     const [rideTotals, userTotals, onlineCandidates] = await Promise.all([
       db.select({
         totalRides: sql<number>`count(*)::int`,
