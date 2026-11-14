@@ -10,6 +10,7 @@ import type { Server as SocketIOServer } from "socket.io";
 import { clearTestData } from "../lib/clear-test-data";
 
 import { calculateCommission, getFeeSettings, driverBalance } from "../lib/commission";
+import { addHistoryRoutes, recifeTodayStart } from "../lib/admin-history";
 import { addFinanceRoutes } from "../lib/finance-routes";
 
 import { getNightFares, isNightFare, saveNightFares, validNightFares } from "../lib/night-fares";
@@ -2163,5 +2164,6 @@ router.get("/pricing/lookup", requireAuth, async (req: Request, res: Response) =
 });
 
 addFinanceRoutes(router, requireAdmin);
+addHistoryRoutes(router, requireAdmin);
 
 export default router;
