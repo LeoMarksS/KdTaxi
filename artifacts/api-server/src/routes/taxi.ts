@@ -7,6 +7,7 @@ import { db, users as dbUsers, sessions as dbSessions, rides as dbRides, chatMes
 import { and, asc, desc, eq, getTableColumns, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Server as SocketIOServer } from "socket.io";
 
+import { getAdminUsers, parseAdminUsersQuery } from "../lib/admin-users";
 import { clearTestData } from "../lib/clear-test-data";
 
 import { calculateCommission, getFeeSettings, driverBalance } from "../lib/commission";
@@ -838,6 +839,16 @@ router.put("/users/:id", requireAuth, async (req: Request, res: Response) => {
     console.error("[profile] Erro ao atualizar perfil:");
     res.status(500).json({ error: "Não foi possível atualizar o perfil" });
   }
+});
+
+// Paginated admin listing; the legacy /users array remains compatible with installed apps.
+router.get('/admin/users', requireAdmin, async (req: Request, res: Response) => {
+  let filters;
+  try { filters = parseAdminUsersQuery(req.query); }
+  catch (error) { res.status(400).json({ error: (error as Error).message }); return; }
+  const result = await getAdminUsers(filters);
+  res.set('Cache-Control', 'no-store');
+  res.json({ ...result, users: result.users.map(u => ({ ...u, isOnline: u.mode === 'driver' && isDriverOnline(u.id) })) });
 });
 
 // GET /users – admin only, list of clients/drivers without passwords or push tokens
