@@ -4,7 +4,7 @@ import { Route, Switch, useLocation, Router as WouterRouter, Link } from 'wouter
 import { setAuthTokenGetter } from '@workspace/api-client-react';
 import {
   getGetAdminStatsQueryKey, getListUsersQueryKey, getListRidesQueryKey, getListPricingQueryKey,
-  useGetAdminStats, useListUsers, useListRides, useListPricing, useLoginUser, useLogoutUser,
+  useGetAdminStats, useListRides, useListPricing, useLoginUser, useLogoutUser,
   useCreateAdminUser, useUpdateAdminUser, useDeleteAdminUser, useUpsertPricing, useDeletePricing,
 } from '@workspace/api-client-react';
 import type { AdminStats, User, Ride, PriceRule, AdminUserInput, PricingInput } from '@workspace/api-client-react';
@@ -47,8 +47,8 @@ async function adminRequest(path: string, method: string, body: object): Promise
   return data as DriverUser;
 }
 
-async function adminRead<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, { headers: { Authorization: `Bearer ${localStorage.getItem(TOKEN_KEY) ?? ''}` } });
+async function adminRead<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(`${apiBase}${path}`, { signal, headers: { Authorization: `Bearer ${localStorage.getItem(TOKEN_KEY) ?? ''}` } });
   if (!response.ok) throw Object.assign(new Error('Não foi possível atualizar.'), { status: response.status });
   return response.json();
 }
@@ -177,14 +177,24 @@ function RideRow({ ride, compact = false }: { ride: Ride; compact?: boolean }) {
   </tr>;
 }
 
+type UsersPageData = { users: DriverUser[]; total: number; counts: { clients: number; drivers: number }; page: number; pages: number; pageSize: number };
+
 function UserPage({ notify, approvalsOnly = false }: { approvalsOnly?: boolean; notify: (message: string, kind?: 'success' | 'error') => void }) {
   const queryClient = useQueryClient();
-  const query = useListUsers({ query: { queryKey: getListUsersQueryKey(), refetchInterval: AUTO_REFRESH_MS } });
   const createUser = useCreateAdminUser();
   const updateUser = useUpdateAdminUser();
   const deleteUser = useDeleteAdminUser();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | 'client' | 'driver'>('all');
+  const [page, setPage] = useState(1);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => { const timer = setTimeout(() => { setDebouncedSearch(search.trim()); setPage(1); }, 350); return () => clearTimeout(timer); }, [search]);
+  const query = useQuery({
+    queryKey: [...getListUsersQueryKey(), 'paged', approvalsOnly, filter, debouncedSearch, page],
+    queryFn: ({ signal }) => adminRead<UsersPageData>(`/admin/users?${new URLSearchParams({ page: String(page), search: debouncedSearch, mode: filter, pending: String(approvalsOnly) })}`, signal),
+    refetchInterval: AUTO_REFRESH_MS,
+  });
+  useEffect(() => { if (query.data && query.data.page !== page) setPage(query.data.page); }, [query.data, page]);
   const [editing, setEditing] = useState<User | null>(null);
   const [creating, setCreating] = useState(false);
   const [createMode, setCreateMode] = useState<'client' | 'driver'>('client');
@@ -193,9 +203,11 @@ function UserPage({ notify, approvalsOnly = false }: { approvalsOnly?: boolean; 
   const [reviewSaving, setReviewSaving] = useState(false);
   const [reviewError, setReviewError] = useState('');
   const [formError, setFormError] = useState('');
-  const users = (query.data ?? []) as DriverUser[];
-  const filtered = useMemo(() => users.filter((user) => (!approvalsOnly || (user.mode === 'driver' && user.approvalStatus === 'pending')) && (filter === 'all' || user.mode === filter) && `${user.name} ${user.phone}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => a.name.localeCompare(b.name)), [users, filter, search, approvalsOnly]);
-  const countByMode = (mode: string) => users.filter((user) => user.mode === mode).length;
+  const users = query.data?.users ?? [];
+  const filtered = users;
+  const total = query.data?.total ?? 0;
+  const counts = query.data?.counts ?? { clients: 0, drivers: 0 };
+  const countByMode = (mode: string) => mode === 'client' ? counts.clients : counts.drivers;
   const saveUser = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setFormError('');
     const form = new FormData(event.currentTarget);
@@ -252,16 +264,16 @@ function UserPage({ notify, approvalsOnly = false }: { approvalsOnly?: boolean; 
   };
   const modalUser = editing ?? undefined;
   return <main className="page-enter">
-     <div className="page-heading"><div><div className="eyebrow">CADASTROS · {users.length.toLocaleString('pt-BR')} CONTAS</div><h1>{approvalsOnly ? 'Aprovações pendentes' : 'Usuários'}</h1><p>{approvalsOnly ? 'Confira a foto e os dados do veículo antes de aprovar o motorista.' : 'Gerencie os perfis que fazem a operação acontecer.'}</p></div><Button onClick={() => { setFormError(''); setCreateMode('client'); setCreating(true); }} testId="button-add-user"><Plus size={16} /> Novo usuário</Button></div>
+     <div className="page-heading"><div><div className="eyebrow">CADASTROS · {(counts.clients + counts.drivers).toLocaleString('pt-BR')} CONTAS</div><h1>{approvalsOnly ? 'Aprovações pendentes' : 'Usuários'}</h1><p>{approvalsOnly ? 'Confira a foto e os dados do veículo antes de aprovar o motorista.' : 'Gerencie os perfis que fazem a operação acontecer.'}</p></div><Button onClick={() => { setFormError(''); setCreateMode('client'); setCreating(true); }} testId="button-add-user"><Plus size={16} /> Novo usuário</Button></div>
      <div className="summary-band"><div><span>Clientes</span><b>{countByMode('client')}</b></div><i /><div><span>Motoristas</span><b>{countByMode('driver')}</b></div><i /><div className="band-note"><span>Disponibilidade é gerida no app do motorista.</span></div></div>
     <section className="content-panel list-panel">
       <div className="filters-row"><div className="search-field"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome ou telefone" aria-label="Buscar usuários" data-testid="input-search-users" />{search && <button onClick={() => setSearch('')} aria-label="Limpar busca" data-testid="button-clear-user-search"><X size={14} /></button>}</div>
-        <div className="filter-pills" role="group" aria-label="Filtrar usuários">{(['all', 'client', 'driver'] as const).map((option) => <button key={option} className={filter === option ? 'filter-active' : ''} onClick={() => setFilter(option)} data-testid={`filter-users-${option}`}>{option === 'all' ? `Todos ${users.length}` : `${roleName(option)} ${countByMode(option)}`}</button>)}</div></div>
+        <div className="filter-pills" role="group" aria-label="Filtrar usuários">{(['all', 'client', 'driver'] as const).map((option) => <button key={option} className={filter === option ? 'filter-active' : ''} onClick={() => { setFilter(option); setPage(1); }} data-testid={`filter-users-${option}`}>{option === 'all' ? `Todos ${counts.clients + counts.drivers}` : `${roleName(option)} ${countByMode(option)}`}</button>)}</div></div>
        {query.isLoading && !query.data ? <LoadingRows /> : query.isError && !query.data ? <QueryError onRetry={() => void query.refetch()} /> : filtered.length === 0 ?
         <EmptyState title={search ? 'Nenhum resultado' : approvalsOnly ? 'Nenhuma aprovação pendente' : 'Nenhum usuário cadastrado'} text={search ? 'Tente buscar por outro nome ou telefone.' : approvalsOnly ? 'Os novos motoristas e alterações de veículo aparecerão aqui.' : 'Cadastros aparecerão aqui quando forem criados.'} /> :
         <div className="table-wrap"><table><thead><tr><th>Perfil</th><th>Tipo</th><th>Corridas</th><th>Avaliação</th><th>Cadastro</th><th><span className="sr-only">Ações</span></th></tr></thead><tbody>
           {filtered.map((user) => <tr key={user.id} data-testid={`row-user-${user.id}`}>
-            <td><div className="person-cell"><span className="avatar">{user.photo ? <img src={user.photo} alt="" /> : initials(user.name)}</span><div><strong data-testid={`text-user-name-${user.id}`}>{user.name}</strong><small className="mono">{user.phone}</small></div></div></td>
+            <td><div className="person-cell"><span className="avatar">{user.photo ? <img src={user.photo} alt="" loading="lazy" /> : initials(user.name)}</span><div><strong data-testid={`text-user-name-${user.id}`}>{user.name}</strong><small className="mono">{user.phone}</small></div></div></td>
             <td><span className={`role-pill role-${user.mode}`}>{user.mode === 'driver' ? user.vehicleType === 'motorcycle' ? <Bike size={13} /> : <CarFront size={13} /> : <UserRound size={13} />}{roleName(user.mode)}</span>
               {user.mode === 'driver' && <small style={{ display: 'block', marginTop: 4 }}>
                 {user.approvalStatus === 'pending' ? 'Aguardando aprovação' : user.approvalStatus === 'rejected' ? 'Correção solicitada' : 'Aprovado'}
@@ -275,7 +287,13 @@ function UserPage({ notify, approvalsOnly = false }: { approvalsOnly?: boolean; 
               <IconButton label={`Excluir ${user.name}`} onClick={() => setRemoving(user)} testId={`button-delete-user-${user.id}`}><Trash2 size={16} /></IconButton></div></td>
           </tr>)}
         </tbody></table></div>}
-       <div className="table-footer"><span>Exibindo <b>{filtered.length}</b> de <b>{users.length}</b> usuários</span><span className="mono">ATUALIZAÇÃO AUTOMÁTICA · 1 MIN</span></div>
+       {query.isError && query.data && <div className="form-alert" role="alert">Não foi possível atualizar a lista. <button onClick={() => void query.refetch()}>Tentar novamente</button></div>}
+       <div className="table-footer history-pagination" aria-label="Paginação de usuários">
+         <span aria-live="polite">Exibindo <b>{total ? ((query.data?.page ?? 1) - 1) * 20 + 1 : 0}–{total ? ((query.data?.page ?? 1) - 1) * 20 + users.length : 0}</b> de <b>{total}</b> usuários</span>
+         <Button variant="secondary" disabled={!query.data || query.data.page <= 1 || query.isFetching} onClick={() => setPage((query.data?.page ?? 1) - 1)} testId="button-users-previous">Anterior</Button>
+         <span>Página {query.data?.page ?? 1} de {query.data?.pages ?? 1}</span>
+         <Button variant="secondary" disabled={!query.data || query.data.page >= query.data.pages || query.isFetching} onClick={() => setPage((query.data?.page ?? 1) + 1)} testId="button-users-next">Próxima</Button>
+       </div>
     </section>
     {(creating || modalUser) && <Dialog title={editing ? 'Editar perfil' : 'Novo usuário'} subtitle={editing ? 'Atualize os dados básicos deste cadastro.' : 'Cadastre um cliente ou motorista na plataforma.'} onClose={() => { setCreating(false); setEditing(null); }} >
       <form onSubmit={saveUser} className="form-stack">
