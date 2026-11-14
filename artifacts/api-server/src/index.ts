@@ -1,6 +1,7 @@
 import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import app from "./app";
+import { initializeNightFares } from "./lib/night-fares";
 import { initializeFinance } from "./lib/commission";
 import { secureSocket, parseChatInput } from "./lib/socket-security";
 import { logger } from "./lib/logger";
@@ -68,10 +69,10 @@ io.use(async (socket, next) => {
 });
 
 io.on("connection", (socket) => {
-  secureSocket(socket, authenticateSocketToken);
+  secureSocket(socket, token => authenticateSocketToken(token, false));
   socket.on("error", () => { /* Rejected packets do not reach event handlers. */ });
   const sessionCheck = setInterval(() => {
-    void authenticateSocketToken(socket.data.sessionToken)
+    void authenticateSocketToken(socket.data.sessionToken, false)
       .then(current => { if (!current || current.id !== socket.data.user.id) socket.disconnect(true); })
       .catch(() => socket.disconnect(true));
   }, 60_000);
@@ -145,6 +146,7 @@ io.on("connection", (socket) => {
 });
 
 initializeFinance()
+  .then(() => initializeNightFares())
   .then(() => initializeAuthStore())
   .then(() => {
     httpServer.listen(port, (err?: Error) => {

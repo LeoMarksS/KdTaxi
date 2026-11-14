@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { clearSystemNotifications } from '../../kd-taxi/lib/notification-cleanup';
+import { createRequire } from 'node:module';
+const { clearSystemNotifications } = createRequire(import.meta.url)('../../kd-taxi/lib/notification-cleanup.ts') as typeof import('../../kd-taxi/lib/notification-cleanup');
 test('limpa alertas entregues antes de zerar contador do launcher', async () => {
  const calls: (string | number)[]=[];
  await clearSystemNotifications({dismissAllNotificationsAsync:async()=>{calls.push('dismiss');},setBadgeCountAsync:async n=>{calls.push(n);return true;}});

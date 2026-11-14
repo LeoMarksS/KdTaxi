@@ -4,7 +4,7 @@ import type { NextFunction, Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { db, users as dbUsers, sessions as dbSessions, rides as dbRides, chatMessages as dbChatMessages, pricingRules as dbPricingRules } from "@workspace/db";
-import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, getTableColumns, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Server as SocketIOServer } from "socket.io";
 
 import { clearTestData } from "../lib/clear-test-data";
@@ -12,6 +12,8 @@ import { clearTestData } from "../lib/clear-test-data";
 import { calculateCommission, getFeeSettings, driverBalance } from "../lib/commission";
 import { addHistoryRoutes, recifeTodayStart } from "../lib/admin-history";
 import { addFinanceRoutes } from "../lib/finance-routes";
+
+import { getNightFares, isNightFare, saveNightFares, validNightFares } from "../lib/night-fares";
 
 const router = Router();
 
@@ -328,7 +330,7 @@ async function revokeOtherUserSessions(userId: string, keepToken?: string): Prom
   }
 }
 
-async function getUserByToken(token: string | undefined): Promise<User | undefined> {
+async function getUserByToken(token: string | undefined, includePhoto = true): Promise<User | undefined> {
   if (typeof token !== "string" || !/^[a-f0-9]{64}$/.test(token)) return undefined;
 
   const [session] = await db.select().from(dbSessions)
@@ -346,10 +348,14 @@ async function getUserByToken(token: string | undefined): Promise<User | undefin
   }
 
   // Re-read account permissions so revocation is effective across sessions and restarts.
-  const [record] = await db.select().from(dbUsers)
-    .where(eq(dbUsers.id, session.userId)).limit(1);
+  const columns = getTableColumns(dbUsers);
+  const [record] = await db.select({ ...columns,
+    photo: includePhoto ? columns.photo : sql<string | null>`null`,
+  }).from(dbUsers).where(eq(dbUsers.id, session.userId)).limit(1);
   if (!record || record.deletedAt) { users.delete(session.userId); return undefined; }
   const user = userFromRecord(record);
+  // Lightweight socket checks refresh permissions without erasing the cached photo.
+  if (!includePhoto) user.photo = users.get(user.id)?.photo;
   users.set(user.id, user);
 
   if (!user.active) {
@@ -364,11 +370,11 @@ async function getUserByToken(token: string | undefined): Promise<User | undefin
 async function getSessionUser(req: Request): Promise<User | undefined> {
   const auth = req.headers.authorization;
   if (!auth?.startsWith("Bearer ")) return undefined;
-  return getUserByToken(auth.slice(7));
+  return getUserByToken(auth.slice(7), req.method !== "GET");
 }
 
-export async function authenticateSocketToken(token: string | undefined) {
-  const user = await getUserByToken(token);
+export async function authenticateSocketToken(token: string | undefined, includePhoto = true) {
+  const user = await getUserByToken(token, includePhoto);
   if (!user) return undefined;
   return safeUser(user);
 }
@@ -533,7 +539,8 @@ export function sendChatPushNotification(userId: string, senderName: string, rid
 async function lookupPrice(
   destination: string,
   vehicleType: "car" | "motorcycle",
-): Promise<{ price: number; isLocal: boolean } | undefined> {
+  at = new Date(),
+): Promise<{ price: number; isLocal: boolean; farePeriod?: "day" | "night" } | undefined> {
   const dest = destination.toLowerCase().trim();
   if (!dest) return undefined;
 
@@ -557,9 +564,13 @@ async function lookupPrice(
   const localRule = currentRules.find((rule) => rule.isLocal);
   if (!localRule) return undefined;
 
-  const price = vehiclePrice(localRule);
+  const night = await getNightFares();
+  const nighttime = isNightFare(night, at);
+  // An unset daytime vehicle fare remains unavailable at night too.
+  if (vehiclePrice(localRule) === null) return undefined;
+  const price = nighttime ? (vehicleType === 'motorcycle' ? night.motorcyclePrice : night.carPrice) : vehiclePrice(localRule);
   return typeof price === "number" && Number.isFinite(price)
-    ? { price, isLocal: true }
+    ? { price, isLocal: true, farePeriod: nighttime ? "night" : "day" }
     : undefined;
 }
 
@@ -847,6 +858,13 @@ router.get("/users", requireAdmin, async (_req: Request, res: Response) => {
     console.error("[admin] Erro ao listar usuários:");
     res.status(500).json({ error: "Não foi possível listar os usuários" });
   }
+});
+
+// Lightweight approval notification; photos are loaded only on the review page.
+router.get('/admin/pending-drivers', requireAdmin, async (_req: Request, res: Response) => {
+  const records = await db.select({ id: dbUsers.id }).from(dbUsers)
+    .where(and(isNull(dbUsers.deletedAt), eq(dbUsers.mode, 'driver'), eq(dbUsers.approvalStatus, 'pending')));
+  res.json(records);
 });
 
 // GET /users/:id – self or admin only
@@ -1256,38 +1274,33 @@ router.post("/admin/reset-test-data", requireAdmin, resetDataLimiter, async (req
 // GET /admin/stats – estatísticas calculadas diretamente do Neon.
 router.get("/admin/stats", requireAdmin, async (_req: Request, res: Response) => {
   try {
-    const [rideRecords, userRecords] = await Promise.all([
-      db.select({ status: dbRides.status, price: dbRides.price, createdAt: dbRides.createdAt }).from(dbRides),
-      db.select({ id: dbUsers.id, mode: dbUsers.mode, vehicleType: dbUsers.vehicleType, deletedAt: dbUsers.deletedAt, rating: dbUsers.rating, rideCount: dbUsers.rideCount }).from(dbUsers),
-    ]);
-
-    const allRideList = rideRecords;
-    const allUserList = userRecords.filter((r) => !r.deletedAt);
     const todayStart = recifeTodayStart();
-
-    const finishedRides = allRideList.filter((r) => r.status === "finished");
-    const todayRides = allRideList.filter((r) => r.createdAt >= todayStart);
-    const todayFinished = todayRides.filter((r) => r.status === "finished");
-    const totalRevenue = finishedRides.reduce((s, r) => s + (r.price ?? 0), 0);
-    const todayRevenue = todayFinished.reduce((s, r) => s + (r.price ?? 0), 0);
-    const ratedUsers = allUserList.filter((u) => u.rideCount > 0);
+    const [rideTotals, userTotals, onlineCandidates] = await Promise.all([
+      db.select({
+        totalRides: sql<number>`count(*)::int`,
+        finishedRides: sql<number>`count(*) filter (where ${dbRides.status} = 'finished')::int`,
+        cancelledRides: sql<number>`count(*) filter (where ${dbRides.status} = 'cancelled')::int`,
+        activeRides: sql<number>`count(*) filter (where ${dbRides.status} in ('waiting','accepted','in_progress'))::int`,
+        totalRevenue: sql<number>`coalesce(sum(${dbRides.price}) filter (where ${dbRides.status} = 'finished'),0)::float8`,
+        todayRides: sql<number>`count(*) filter (where ${dbRides.createdAt} >= ${todayStart.toISOString()})::int`,
+        todayRevenue: sql<number>`coalesce(sum(${dbRides.price}) filter (where ${dbRides.status} = 'finished' and ${dbRides.createdAt} >= ${todayStart.toISOString()}),0)::float8`,
+      }).from(dbRides),
+      db.select({
+        totalUsers: sql<number>`count(*) filter (where ${dbUsers.mode} <> 'admin')::int`,
+        totalClients: sql<number>`count(*) filter (where ${dbUsers.mode} = 'client')::int`,
+        totalDrivers: sql<number>`count(*) filter (where ${dbUsers.mode} = 'driver')::int`,
+        avgRating: sql<number>`coalesce(avg(${dbUsers.rating}) filter (where ${dbUsers.rideCount} > 0),0)::float8`,
+      }).from(dbUsers).where(isNull(dbUsers.deletedAt)),
+      db.select({ id: dbUsers.id, vehicleType: dbUsers.vehicleType }).from(dbUsers)
+        .where(and(isNull(dbUsers.deletedAt), eq(dbUsers.mode, 'driver'), eq(dbUsers.active, true), eq(dbUsers.approvalStatus, 'approved'), eq(dbUsers.isOnline, true))),
+    ]);
+    const online = onlineCandidates.filter(u => isDriverOnline(u.id));
 
     res.json({
-      totalUsers: allUserList.filter((u) => u.mode !== "admin").length,
-      totalClients: allUserList.filter((u) => u.mode === "client").length,
-      totalDrivers: allUserList.filter((u) => u.mode === "driver").length,
-      onlineDrivers: allUserList.filter((u) => u.mode === "driver" && isDriverOnline(u.id)).length,
-      onlineCarDrivers: allUserList.filter((u) => u.mode === "driver" && isDriverOnline(u.id) && (u.vehicleType ?? "car") === "car").length,
-      onlineMotorcycleDrivers: allUserList.filter((u) => u.mode === "driver" && isDriverOnline(u.id) && (u.vehicleType ?? "car") === "motorcycle").length,
-      totalRides: allRideList.length,
-      finishedRides: finishedRides.length,
-      cancelledRides: allRideList.filter((r) => r.status === "cancelled").length,
-      activeRides: allRideList.filter((r) => ["waiting", "accepted", "in_progress"].includes(r.status)).length,
-      totalRevenue,
-      todayRides: todayRides.length,
-      todayRevenue,
-      avgRating: ratedUsers.reduce((s, u) => s + u.rating, 0) /
-        Math.max(1, ratedUsers.length),
+      ...rideTotals[0], ...userTotals[0],
+      onlineDrivers: online.length,
+      onlineCarDrivers: online.filter(u => u.vehicleType !== 'motorcycle').length,
+      onlineMotorcycleDrivers: online.filter(u => u.vehicleType === 'motorcycle').length,
     });
   } catch (error) {
     console.error("[admin] Erro ao consultar estatísticas:");
@@ -1416,7 +1429,8 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
   const selectedVehicle: "car" | "motorcycle" =
     vehicleType === "motorcycle" ? "motorcycle" : "car";
 
-  const priceResult = await lookupPrice(destination, selectedVehicle);
+  const requestedAt = new Date();
+  const priceResult = await lookupPrice(destination, selectedVehicle, requestedAt);
 
   if (!priceResult) {
     const vehicleName = selectedVehicle === "motorcycle" ? "moto" : "carro";
@@ -1443,7 +1457,7 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
     price,
     payment: (payment as Ride["payment"]) ?? "dinheiro",
     status: "waiting",
-    createdAt: new Date().toISOString(),
+    createdAt: requestedAt.toISOString(),
   };
 
   try {
@@ -1452,6 +1466,9 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
       if (!account?.active || account.deletedAt) return false;
       const settings = await getFeeSettings(tx, true);
       const financial = calculateCommission(price, settings.rateBps, settings.enabled);
+      if (req.body.expectedPrice !== undefined &&
+          (typeof req.body.expectedPrice !== 'number' || !Number.isFinite(req.body.expectedPrice) ||
+           Math.round(req.body.expectedPrice * 100) !== Math.round(financial.total * 100))) return 'FARE_CHANGED';
       ride.price = financial.total;
       await tx.insert(dbRides).values({
       id: ride.id,
@@ -1479,6 +1496,10 @@ router.post("/request-ride", requireAuth, async (req: Request, res: Response) =>
       await tx.execute(sql`INSERT INTO ride_financials(ride_id,base_cents,fee_cents,rate_bps) VALUES(${ride.id},${financial.baseCents},${financial.feeCents},${financial.rateBps})`);
       return true;
     });
+    if (created === 'FARE_CHANGED') {
+      res.status(409).json({ error: 'A tarifa mudou. Confira o novo valor antes de confirmar.', code: 'FARE_CHANGED' });
+      return;
+    }
     if (!created) { res.status(403).json({ error: "Conta indisponível" }); return; }
   } catch (error) {
     console.error("[rides] Erro ao salvar nova corrida:");
@@ -1922,13 +1943,20 @@ router.post("/rides/:id/rate", requireAuth, async (req: Request, res: Response) 
 // GET /rides – consulta o Neon e mantém as regras de visibilidade por perfil.
 router.get("/rides", requireAuth, async (req: Request, res: Response) => {
   try {
-    const records = await db.select().from(dbRides);
+    const viewer = req.authUser!;
+    const scope = viewer.mode === 'client' ? eq(dbRides.clientId, viewer.id)
+      : viewer.mode === 'driver' ? or(eq(dbRides.driverId, viewer.id),
+        and(eq(dbRides.status, 'waiting'), eq(dbRides.vehicleType, driverVehicleType(viewer)),
+          sql`${viewer.active && viewer.approvalStatus === 'approved'}`)) : undefined;
+    const summary = viewer.mode === 'admin' && req.query.summary === '1';
+    const columns = getTableColumns(dbRides);
+    const query = db.select(summary ? { ...columns,
+      clientPhoto: sql<string | null>`null`, driverPhoto: sql<string | null>`null`,
+    } : columns).from(dbRides).where(scope).orderBy(desc(dbRides.createdAt), desc(dbRides.id));
+    const records = summary ? await query.limit(6) : await query;
     const allRides = records.map(rideFromRecord);
-
-    rides.clear();
-    for (const ride of allRides) {
-      rides.set(ride.id, ride);
-    }
+    // A scoped read must not evict other users' active rides from the shared cache.
+    if (!summary) for (const ride of allRides) rides.set(ride.id, ride);
 
     const visibleRides = req.authUser!.mode === "driver"
       ? allRides.filter((ride) =>
@@ -1960,20 +1988,29 @@ router.get("/users/:id/rides", requireAuth, async (req: Request, res: Response) 
   const userId = req.params.id as string;
 
   try {
-    const records = await db.select().from(dbRides);
-    const userRides = records
-      .filter((record) =>
-        (record.clientId === userId || record.driverId === userId) &&
-        record.status === "finished"
-      )
-      .map(rideFromRecord)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const records = await db.select().from(dbRides)
+      .where(and(eq(dbRides.status, 'finished'), or(eq(dbRides.clientId, userId), eq(dbRides.driverId, userId))))
+      .orderBy(desc(dbRides.createdAt), desc(dbRides.id));
+    const userRides = records.map(rideFromRecord);
 
     res.json(userRides.map((ride) => rideForViewer(ride, req.authUser!)));
   } catch (error) {
     console.error("[rides] Erro ao consultar histórico no Neon:");
     res.status(500).json({ error: "Não foi possível consultar o histórico de corridas" });
   }
+});
+
+// Local nightly fares are independent of intercity destination rules.
+router.get('/admin/night-fares', requireAdmin, async (_req: Request, res: Response) => {
+  res.json(await getNightFares());
+});
+router.put('/admin/night-fares', requireAdmin, async (req: Request, res: Response) => {
+  if (!validNightFares(req.body)) {
+    res.status(400).json({ error: 'Confira os horários, o fuso e os valores da tarifa noturna.' }); return;
+  }
+  const { enabled, start, end, timeZone, carPrice, motorcyclePrice } = req.body;
+  await saveNightFares({ enabled, start, end, timeZone, carPrice, motorcyclePrice }, req.authUser!.id);
+  res.json(await getNightFares());
 });
 
 // GET /pricing – consulta as tarifas persistidas no Neon.
@@ -2120,6 +2157,7 @@ router.get("/pricing/lookup", requireAuth, async (req: Request, res: Response) =
     basePrice: result?.price ?? null,
     platformFee: quote ? quote.feeCents / 100 : null,
     isLocal: result?.isLocal ?? false,
+    farePeriod: result?.farePeriod ?? "day",
     vehicleType,
   });
 });

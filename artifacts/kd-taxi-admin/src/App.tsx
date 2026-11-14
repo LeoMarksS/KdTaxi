@@ -1,5 +1,5 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { QueryCache, QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { QueryCache, QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Route, Switch, useLocation, Router as WouterRouter, Link } from 'wouter';
 import { setAuthTokenGetter } from '@workspace/api-client-react';
 import {
@@ -17,6 +17,7 @@ import {
 import logo from './assets/kd-taxi-icon.png';
 import NotFound from '@/pages/not-found';
 import FinancePage from './pages/Finance';
+import NightFares from './components/NightFares';
 import HistoryPage from './pages/History';
 
 function accountDeletionError(error: unknown): string {
@@ -44,6 +45,12 @@ async function adminRequest(path: string, method: string, body: object): Promise
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || 'Não foi possível salvar.');
   return data as DriverUser;
+}
+
+async function adminRead<T>(path: string): Promise<T> {
+  const response = await fetch(`${apiBase}${path}`, { headers: { Authorization: `Bearer ${localStorage.getItem(TOKEN_KEY) ?? ''}` } });
+  if (!response.ok) throw Object.assign(new Error('Não foi possível atualizar.'), { status: response.status });
+  return response.json();
 }
 
 const isAuthError = (error: unknown) => Boolean(error && typeof error === 'object' && 'status' in error && ((error as { status: number }).status === 401 || (error as { status: number }).status === 403));
@@ -123,7 +130,7 @@ function StatCard({ label, value, note, icon, trend, accent = false }: { label: 
 
 function Dashboard({ goRides }: { goRides: () => void }) {
   const statsQuery = useGetAdminStats({ query: { queryKey: getGetAdminStatsQueryKey(), refetchInterval: AUTO_REFRESH_MS } });
-  const ridesQuery = useListRides({ query: { queryKey: getListRidesQueryKey(), refetchInterval: AUTO_REFRESH_MS } });
+  const ridesQuery = useQuery({ queryKey: ['/api/rides', 'summary'], queryFn: () => adminRead<Ride[]>('/rides?summary=1'), refetchInterval: AUTO_REFRESH_MS });
   const stats = statsQuery.data as AdminStats | undefined;
   const recentRides = useMemo(() => [...(ridesQuery.data ?? [])].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)).slice(0, 6), [ridesQuery.data]);
   const refresh = () => { void statsQuery.refetch(); void ridesQuery.refetch(); };
@@ -199,18 +206,18 @@ function UserPage({ notify, approvalsOnly = false }: { approvalsOnly?: boolean; 
     if (editing) {
       const vehicleType = String(form.get('vehicleType') ?? editing.vehicleType ?? 'car') as NonNullable<User['vehicleType']>;
       const data = { name, phone, ...(editing.mode === 'driver' ? { vehicleType } : {}), ...(password ? { password } : {}) };
-      updateUser.mutate({ id: editing.id, data }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() }); setEditing(null); notify('Perfil atualizado.'); }, onError: (error) => { if (isAuthError(error)) raiseAuthExpired(); setFormError(isAuthError(error) ? 'Sua sessão expirou. Entre novamente.' : 'Não foi possível salvar as alterações.'); } });
+      updateUser.mutate({ id: editing.id, data }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() }); void queryClient.invalidateQueries({ queryKey: ['/api/admin/pending-drivers'] }); setEditing(null); notify('Perfil atualizado.'); }, onError: (error) => { if (isAuthError(error)) raiseAuthExpired(); setFormError(isAuthError(error) ? 'Sua sessão expirou. Entre novamente.' : 'Não foi possível salvar as alterações.'); } });
     } else {
       const data: AdminUserInput = {
         name, phone, password, mode: createMode,
         ...(createMode === 'driver' ? { vehicleType: String(form.get('vehicleType') ?? 'car') as NonNullable<User['vehicleType']> } : {}),
       };
-      createUser.mutate({ data }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() }); void queryClient.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() }); setCreating(false); notify('Conta criada com sucesso.'); }, onError: (error) => { if (isAuthError(error)) raiseAuthExpired(); setFormError(isAuthError(error) ? 'Sua sessão expirou. Entre novamente.' : 'Não foi possível criar a conta. Confira os dados e tente novamente.'); } });
+      createUser.mutate({ data }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() }); void queryClient.invalidateQueries({ queryKey: ['/api/admin/pending-drivers'] }); void queryClient.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() }); setCreating(false); notify('Conta criada com sucesso.'); }, onError: (error) => { if (isAuthError(error)) raiseAuthExpired(); setFormError(isAuthError(error) ? 'Sua sessão expirou. Entre novamente.' : 'Não foi possível criar a conta. Confira os dados e tente novamente.'); } });
     }
   };
   const confirmDelete = () => {
     if (!removing) return;
-    deleteUser.mutate({ id: removing.id }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() }); void queryClient.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() }); notify('Conta excluída.'); setRemoving(null); }, onError: (error) => { if (isAuthError(error)) { raiseAuthExpired(); return; } notify(accountDeletionError(error), 'error'); } });
+    deleteUser.mutate({ id: removing.id }, { onSuccess: () => { void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() }); void queryClient.invalidateQueries({ queryKey: ['/api/admin/pending-drivers'] }); void queryClient.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() }); notify('Conta excluída.'); setRemoving(null); }, onError: (error) => { if (isAuthError(error)) { raiseAuthExpired(); return; } notify(accountDeletionError(error), 'error'); } });
   };
   const saveDriverVehicle = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -226,7 +233,7 @@ function UserPage({ notify, approvalsOnly = false }: { approvalsOnly?: boolean; 
         vehiclePlate: String(form.get('vehiclePlate') ?? '').trim(),
       });
       setReviewing(updated);
-      void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
+      void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() }); void queryClient.invalidateQueries({ queryKey: ['/api/admin/pending-drivers'] });
       notify('Veículo salvo. Aguarda aprovação.');
     } catch (error) { setReviewError(error instanceof Error ? error.message : 'Falha ao salvar veículo.'); }
     finally { setReviewSaving(false); }
@@ -237,7 +244,7 @@ function UserPage({ notify, approvalsOnly = false }: { approvalsOnly?: boolean; 
     try {
       const updated = await adminRequest(`/admin/drivers/${reviewing.id}/approval`, 'POST', { status });
       setReviewing(updated);
-      void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() });
+      void queryClient.invalidateQueries({ queryKey: getListUsersQueryKey() }); void queryClient.invalidateQueries({ queryKey: ['/api/admin/pending-drivers'] });
       void queryClient.invalidateQueries({ queryKey: getGetAdminStatsQueryKey() });
       notify(status === 'approved' ? 'Motorista aprovado.' : 'Cadastro devolvido para correção.');
     } catch (error) { setReviewError(error instanceof Error ? error.message : 'Falha ao salvar decisão.'); }
@@ -392,6 +399,7 @@ function PricingPage({ notify }: { notify: (message: string, kind?: 'success' | 
   };
   return <main className="page-enter">
     <div className="page-heading"><div><div className="eyebrow">TARIFAS · {destinationRules.length.toLocaleString('pt-BR')} DESTINOS</div><h1>Preços</h1><p>Tarifas base do motorista. A taxa do KD TAXI é configurada em Financeiro e acrescentada ao total.</p></div><Button onClick={() => { setFormError(''); setEditing({ id: '', destination: '', carPrice: null, motorcyclePrice: null, isLocal: false, createdAt: '' }); }} testId="button-add-price"><Plus size={16} /> Nova regra</Button></div>
+    <NightFares notify={notify} />
     <section className="pricing-intro"><span className="price-illustration"><Tag size={22} /></span><div><div className="eyebrow">TABELA DE TARIFAS</div><h2>Preço previsível, viagem tranquila.</h2><p>Destinos específicos têm prioridade sobre o preço fixo local.</p></div><div className="price-total"><small>DESTINOS CONFIGURADOS</small><b>{destinationRules.length.toString().padStart(2, '0')}</b></div></section>
     {query.isLoading && !query.data ? <div className="price-grid">{Array.from({ length: 4 }, (_, index) => <div className="price-card" key={index}><div className="skeleton sk-line" /><div className="skeleton sk-big" /></div>)}</div> : query.isError && !query.data ? <QueryError onRetry={() => void query.refetch()} /> : <>
       <section className="local-price-panel" data-testid="panel-local-price">
@@ -491,8 +499,8 @@ function SignIn({ onSignedIn, authNotice }: { onSignedIn: (user: User, token: st
 function AdminShell({ user, onLogout, notify }: { user: User; onLogout: () => void; notify: (message: string, kind?: 'success' | 'error') => void }) {
   const [path, setPath] = useLocation();
   const [mobileNav, setMobileNav] = useState(false);
-  const pendingQuery = useListUsers({ query: { queryKey: getListUsersQueryKey(), refetchInterval: AUTO_REFRESH_MS, refetchOnWindowFocus: true } });
-  const pending = ((pendingQuery.data ?? []) as DriverUser[]).filter(u => u.mode === 'driver' && u.approvalStatus === 'pending');
+  const pendingQuery = useQuery({ queryKey: ['/api/admin/pending-drivers'], queryFn: () => adminRead<{ id: string }[]>('/admin/pending-drivers'), refetchInterval: AUTO_REFRESH_MS, refetchOnWindowFocus: true });
+  const pending = pendingQuery.data ?? [];
   const previousPending = useRef<Set<string> | null>(null);
   useEffect(() => {
     if (!pendingQuery.data) return;

@@ -1,6 +1,7 @@
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
+import { prepareProfilePhoto } from "@/utils/profilePhoto";
 import { LinearGradient } from "@/components/CompatLinearGradient";
 import { router } from "expo-router";
 import React, { useState } from "react";
@@ -59,13 +60,13 @@ export default function LoginScreen() {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.4,
-      base64: true,
     });
     const asset = !result.canceled ? result.assets[0] : undefined;
-    if (asset?.base64) {
-      const mime = asset.mimeType ?? "image/jpeg";
-      setPhoto(`data:${mime};base64,${asset.base64}`);
-      Haptics.selectionAsync();
+    if (asset) {
+      try {
+        setPhoto(await prepareProfilePhoto(asset));
+        Haptics.selectionAsync();
+      } catch { setError("Não foi possível preparar a foto. Tente outra imagem."); }
     }
   };
 

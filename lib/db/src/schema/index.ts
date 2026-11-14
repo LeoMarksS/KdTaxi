@@ -1,5 +1,6 @@
 import {
   pgTable,
+  jsonb,
   varchar,
   uuid,
   text,
@@ -174,4 +175,22 @@ export const driverSettlements = pgTable('driver_settlements', {
 export const platformFeeAudit = pgTable('platform_fee_audit', {
   id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(), adminId: varchar('admin_id', { length: 100 }).notNull(),
   enabled: boolean('enabled').notNull(), rateBps: integer('rate_bps').notNull(), createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Tarifa noturna local; mudanças não recalculam corridas já solicitadas.
+export const nightFareSettings = pgTable('night_fare_settings', {
+  id: integer('id').primaryKey(),
+  enabled: boolean('enabled').notNull().default(false),
+  start: varchar('start_time', { length: 5 }).notNull().default('00:00'),
+  end: varchar('end_time', { length: 5 }).notNull().default('05:00'),
+  timeZone: varchar('time_zone', { length: 80 }).notNull().default('America/Recife'),
+  carPrice: numeric('car_price', { precision: 10, scale: 2, mode: 'number' }).notNull().default(25),
+  motorcyclePrice: numeric('motorcycle_price', { precision: 10, scale: 2, mode: 'number' }).notNull().default(10),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+export const nightFareAudit = pgTable('night_fare_audit', {
+  id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+  adminId: varchar('admin_id', { length: 100 }).notNull(),
+  settings: jsonb('settings').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
