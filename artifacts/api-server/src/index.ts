@@ -10,7 +10,6 @@ import {
   authenticateSocketToken,
   setSocketServer,
   getRideParticipants,
-  isRideParticipant,
   recordChatMessage,
   isUserForeground,
   sendChatPushNotification,
@@ -107,7 +106,10 @@ io.on("connection", (socket) => {
     const input = parseChatInput(msg);
     if (!input) return;
     const { rideId, text } = input;
-    if (!isRideParticipant(rideId, user.id)) return;
+    let participants: { clientId?: string; driverId?: string };
+    try { participants = await getRideParticipants(rideId); }
+    catch { logger.warn('Falha ao validar participantes do chat'); return; }
+    if (user.id !== participants.clientId && user.id !== participants.driverId) return;
 
     // A identidade vem do socket autenticado, nunca dos dados enviados pelo aplicativo.
     const fullMsg: ChatMessage = {
@@ -127,7 +129,7 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const { clientId, driverId } = getRideParticipants(rideId);
+    const { clientId, driverId } = participants;
     if (clientId) io.to(`user:${clientId}`).emit("mensagem_chat", fullMsg);
     if (driverId) io.to(`user:${driverId}`).emit("mensagem_chat", fullMsg);
 
