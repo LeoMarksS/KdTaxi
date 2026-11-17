@@ -5,6 +5,7 @@ import { useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   FlatList,
+  ActivityIndicator,
   Platform,
   StyleSheet,
   Text,
@@ -91,7 +92,7 @@ export default function ChatScreen() {
   const {
     user, chatMessagesByRide, sendChatMessage,
     activeRide, activeRides, myRides, markChatRead, setChatOpen, fetchChatHistory,
-    finishedRideToRate,
+    finishedRideToRate, chatPageStateByRide,
   } = useApp();
   const [text, setText] = useState("");
   const flatRef = useRef<FlatList>(null);
@@ -109,6 +110,7 @@ export default function ChatScreen() {
   const rideInfo = ride ?? finishedRide;
   const isFinished = !ride && !!finishedRide;
 
+  const chatPage = rideId ? chatPageStateByRide[rideId] : undefined;
   const messages = (rideId ? chatMessagesByRide[rideId] : undefined) ?? [];
 
   // Fetch server-side history and mark as read whenever this chat is focused
@@ -123,12 +125,6 @@ export default function ChatScreen() {
       };
     }, [rideId, setChatOpen, markChatRead, fetchChatHistory])
   );
-
-  // Fetch history also when new messages arrive (keeps history fresh in case
-  // the component was already mounted when a message came in while offline)
-  useEffect(() => {
-    if (rideId) fetchChatHistory(rideId);
-  }, [rideId]);
 
   // When the client is in chat and the ride finishes, the RatingModal pops up
   // (rendered below). After the client rates or skips, finishedRideToRate is
@@ -260,6 +256,14 @@ export default function ChatScreen() {
           renderItem={({ item }) => (
             <Message msg={item} isMe={item.senderId === user?.id} />
           )}
+          onEndReached={() => { if (rideId && chatPage?.hasMore && !chatPage.loading) void fetchChatHistory(rideId, true); }}
+          onEndReachedThreshold={0.2}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          ListFooterComponent={chatPage?.loading ? <ActivityIndicator color={colors.primary} style={{ padding: 16 }} /> : chatPage?.hasMore || chatPage?.error ? (
+            <TouchableOpacity accessibilityRole="button" onPress={() => rideId && void fetchChatHistory(rideId, chatPage.error ? !!chatPage.retryOlder : !!chatPage.hasMore)} style={{ padding: 16 }}>
+              <Text style={{ color: colors.primary, textAlign: 'center' }}>{chatPage.error ?? 'Carregar mensagens anteriores'}</Text>
+            </TouchableOpacity>
+          ) : undefined}
           ListEmptyComponent={
             <View style={s.empty}>
               <Feather name="message-circle" size={40} color={colors.mutedForeground} />

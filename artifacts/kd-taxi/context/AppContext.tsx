@@ -1,3 +1,4 @@
+import { mergeChatMessages, compareChatMessages } from "@/lib/chat-history";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppState, Platform } from "react-native";
 import React, {
@@ -145,7 +146,8 @@ interface AppContextValue {
   unreadChatCount: number;
   unreadByRide: Record<string, number>;
   markChatRead: (rideId: string) => void;
-  fetchChatHistory: (rideId: string) => Promise<void>;
+  fetchChatHistory: (rideId: string, older?: boolean) => Promise<void>;
+  chatPageStateByRide: Record<string, { hasMore: boolean; loading: boolean; error?: string; retryOlder?: boolean }>;
   socket: Socket | null;
   requestRide: (origin: string, destination: string, payment: "pix" | "dinheiro", vehicleType?: VehicleType, expectedPrice?: number) => Promise<Ride | null>;
   acceptRide: (rideId: string) => Promise<void>;
@@ -244,6 +246,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [activeRides, setActiveRides] = useState<Ride[]>([]);
   const [pendingRides, setPendingRides] = useState<Ride[]>([]);
   const [chatMessagesByRide, setChatMessagesByRide] = useState<Record<string, ChatMessage[]>>({});
+  const [chatPageStateByRide, setChatPageStateByRide] = useState<Record<string, { hasMore: boolean; loading: boolean; error?: string; retryOlder?: boolean }>>({});
+  const chatNextCursorRef = useRef<Record<string, string | null>>({});
+  const chatRequestsRef = useRef(new Set<string>());
   const [unreadByRide, setUnreadByRide] = useState<Record<string, number>>({});
   const [allRides, setAllRides] = useState<Ride[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -620,6 +625,48 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }).catch(() => {});
   }, [user?.id, user?.mode, token, isDriverOnline, authFetch]);
 
+  const fetchChatHistory = useCallback(async (rideId: string, older = false) => {
+    const me = userRef.current;
+    const sessionToken = tokenRef.current;
+    if (!me || !sessionToken) return;
+    const requestKey = `${sessionToken}:${rideId}`;
+    const before = older ? chatNextCursorRef.current[rideId] : undefined;
+    if (chatRequestsRef.current.has(requestKey) || (older && !before)) return;
+    chatRequestsRef.current.add(requestKey);
+    setChatPageStateByRide(prev => ({ ...prev, [rideId]: { ...prev[rideId], hasMore: !!chatNextCursorRef.current[rideId], loading: true, error: undefined } }));
+    try {
+      const key = chatReadKey(me.id, rideId);
+      const readId = readCursorsRef.current[key] ?? await AsyncStorage.getItem(key);
+      if (readId) readCursorsRef.current[key] = readId;
+      const query = new URLSearchParams();
+      if (before) query.set('before', before);
+      if (!older && readId) query.set('readId', readId);
+      const res = await authFetch(`/rides/${encodeURIComponent(rideId)}/chat/page?${query}`);
+      if (!res.ok) throw new Error('CHAT_LOAD_FAILED');
+      const data: { messages: ChatMessage[]; nextCursor: string | null; unreadCount?: number } = await res.json();
+      if (userRef.current?.id !== me.id || tokenRef.current !== sessionToken) return;
+      const existing = chatMessagesRef.current[rideId] ?? [];
+      const merged = mergeChatMessages(existing, data.messages);
+      chatMessagesRef.current[rideId] = merged;
+      setChatMessagesByRide(prev => ({ ...prev, [rideId]: mergeChatMessages(prev[rideId] ?? [], data.messages) }));
+      chatNextCursorRef.current[rideId] = data.nextCursor;
+      setChatPageStateByRide(prev => ({ ...prev, [rideId]: { hasMore: !!data.nextCursor, loading: false } }));
+      if (!older) {
+        if (isChatOpenRef.current === rideId) {
+          const latest = merged.at(-1);
+          if (latest) markReadThrough(rideId, latest.id);
+          setUnreadByRide(prev => ({ ...prev, [rideId]: 0 }));
+        } else if ((readCursorsRef.current[key] ?? null) === (readId ?? null)) {
+          const newest = data.messages.at(-1);
+          const arriving = existing.filter(m => m.senderId !== me.id && (!newest || compareChatMessages(m, newest) > 0)).length;
+          setUnreadByRide(prev => ({ ...prev, [rideId]: (data.unreadCount ?? 0) + arriving }));
+        }
+      }
+    } catch {
+      if (userRef.current?.id === me.id && tokenRef.current === sessionToken) setChatPageStateByRide(prev => ({ ...prev, [rideId]: { hasMore: !!chatNextCursorRef.current[rideId], loading: false, retryOlder: older, error: 'Não foi possível carregar as mensagens. Tente novamente.' } }));
+    } finally { chatRequestsRef.current.delete(requestKey); }
+  }, [authFetch, markReadThrough]);
+
   // Socket connection
   useEffect(() => {
     if (!user || !token) return;
@@ -687,28 +734,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           (r.status === "accepted" || r.status === "in_progress") &&
           (r.clientId === me.id || r.driverId === me.id)
         );
-        await Promise.all(chatRides.map(async (ride) => {
-          try {
-            const response = await authFetch(`/rides/${ride.id}/chat`);
-            if (!response.ok) return;
-            const history = await response.json() as ChatMessage[];
-            if (userRef.current?.id !== me.id) return;
-            setChatMessagesByRide((prev) => ({ ...prev, [ride.id]: history }));
-            if (isChatOpenRef.current === ride.id) {
-              const latest = history.at(-1);
-              if (latest) markReadThrough(ride.id, latest.id);
-              setUnreadByRide((prev) => ({ ...prev, [ride.id]: 0 }));
-              return;
-            }
-            const key = chatReadKey(me.id, ride.id);
-            const cursor = readCursorsRef.current[key] ?? await AsyncStorage.getItem(key);
-            if (cursor) readCursorsRef.current[key] = cursor;
-            if (isChatOpenRef.current === ride.id) return;
-            const index = cursor ? history.findIndex((m) => m.id === cursor) : -1;
-            const unread = history.slice(index + 1).filter((m) => m.senderId !== me.id).length;
-            setUnreadByRide((prev) => ({ ...prev, [ride.id]: unread }));
-          } catch {}
-        }));
+        await Promise.all(chatRides.map(ride => fetchChatHistory(ride.id)));
       } catch {}
     };
 
@@ -819,12 +845,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
 
     socket.on("mensagem_chat", (msg: ChatMessage) => {
-      // Deduplicate by id, then append to the per-ride bucket
-      setChatMessagesByRide((prev) => {
-        const existing = prev[msg.rideId] ?? [];
-        if (existing.some((m) => m.id === msg.id)) return prev;
-        return { ...prev, [msg.rideId]: [...existing, msg] };
-      });
+      // Keep the ref current even when an HTTP page and a socket event arrive together.
+      const existing = chatMessagesRef.current[msg.rideId] ?? [];
+      if (existing.some(m => m.id === msg.id)) return;
+      chatMessagesRef.current[msg.rideId] = mergeChatMessages(existing, [msg]);
+      setChatMessagesByRide(prev => ({ ...prev, [msg.rideId]: mergeChatMessages(prev[msg.rideId] ?? [], [msg]) }));
       if (msg.senderId !== userRef.current?.id) {
         // Only increment and notify when the relevant chat screen is not open
         if (isChatOpenRef.current !== msg.rideId) {
@@ -847,7 +872,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       soundTimersRef.current.forEach(clearTimeout);
       soundTimersRef.current = [];
     };
-  }, [user, token, authFetch, markReadThrough]);
+  }, [user, token, authFetch, markReadThrough, fetchChatHistory]);
 
   const requestRide = useCallback(async (
     origin: string,
@@ -978,26 +1003,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (latest) markReadThrough(rideId, latest.id);
   }, [markReadThrough]);
 
-  const fetchChatHistory = useCallback(async (rideId: string) => {
-    try {
-      const res = await authFetch(`/rides/${rideId}/chat`);
-      if (!res.ok) return;
-      const history: ChatMessage[] = await res.json();
-      setChatMessagesByRide((prev) => {
-        const existing = prev[rideId] ?? [];
-        const merged = [...history];
-        for (const m of existing) {
-          if (!merged.some((h) => h.id === m.id)) merged.push(m);
-        }
-        return { ...prev, [rideId]: merged };
-      });
-      if (isChatOpenRef.current === rideId) {
-        const latest = history.at(-1);
-        if (latest) markReadThrough(rideId, latest.id);
-        setUnreadByRide((prev) => ({ ...prev, [rideId]: 0 }));
-      }
-    } catch {}
-  }, [authFetch, markReadThrough]);
 
   const logout = useCallback(() => {
     void clearPresentedNotifications();
@@ -1010,6 +1015,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setActiveRides([]);
     setPendingRides([]);
     setChatMessagesByRide({});
+    chatMessagesRef.current = {};
+    chatNextCursorRef.current = {};
+    setChatPageStateByRide({});
     setUnreadByRide({});
     readCursorsRef.current = {};
     setMyRides([]);
@@ -1154,7 +1162,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       isDriverOnline, setDriverOnline,
       activeRide, setActiveRide, activeRides,
       pendingRides, chatMessagesByRide, sendChatMessage,
-      unreadChatCount, unreadByRide, markChatRead, fetchChatHistory,
+      unreadChatCount, unreadByRide, markChatRead, fetchChatHistory, chatPageStateByRide,
       socket: socketRef.current,
       requestRide, acceptRide, declineRide, startRide, finishRide, cancelRide, rateRide, cancelSoundAlerts,
       logout, allRides, allUsers, pricing,

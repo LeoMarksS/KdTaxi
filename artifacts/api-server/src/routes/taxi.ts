@@ -8,6 +8,7 @@ import { and, asc, desc, eq, getTableColumns, inArray, isNull, lt, or, sql } fro
 import type { Server as SocketIOServer } from "socket.io";
 
 import { getAdminUsers, parseAdminUsersQuery } from "../lib/admin-users";
+import { getChatPage, parseChatPage, loadActiveRideRecords } from "../lib/chat-pages";
 import { clearTestData } from "../lib/clear-test-data";
 
 import { calculateCommission, getFeeSettings, driverBalance } from "../lib/commission";
@@ -151,9 +152,6 @@ const users: Map<string, User> = new Map();
 const rides: Map<string, Ride> = new Map();
 const pricing: Map<string, PriceRule> = new Map();
 const sessions: Map<string, Session> = new Map();
-// Chat history persisted server-side (keyed by rideId) so messages survive
-// brief socket disconnects/reconnects and reloads instead of being lost in transit.
-const chatByRide: Map<string, ChatMessage[]> = new Map();
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -259,7 +257,7 @@ export async function initializeAuthStore(): Promise<void> {
     });
   }
 
-  const userRecords = await db.select().from(dbUsers);
+  const userRecords = await db.select().from(dbUsers).where(isNull(dbUsers.deletedAt));
   users.clear();
   for (const record of userRecords.filter((r) => !r.deletedAt)) {
     users.set(record.id, userFromRecord(record));
@@ -275,7 +273,7 @@ export async function initializeAuthStore(): Promise<void> {
     });
   }
 
-  const rideRecords = await db.select().from(dbRides);
+  const rideRecords = await loadActiveRideRecords();
   rides.clear();
   for (const record of rideRecords) {
     rides.set(record.id, rideFromRecord(record));
@@ -380,10 +378,14 @@ export async function authenticateSocketToken(token: string | undefined, include
   return safeUser(user);
 }
 
-export function isRideParticipant(rideId: string, userId: string): boolean {
-  const ride = rides.get(rideId);
-  if (!ride) return false;
-  return ride.clientId === userId || ride.driverId === userId;
+async function loadRide(id: string): Promise<Ride | undefined> {
+  const cached = rides.get(id);
+  if (cached) return cached;
+  const [record] = await db.select().from(dbRides).where(eq(dbRides.id, id)).limit(1);
+  if (!record) return undefined;
+  const ride = rideFromRecord(record);
+  if (['waiting', 'accepted', 'in_progress'].includes(ride.status)) rides.set(id, ride);
+  return ride;
 }
 
 export async function recordChatMessage(msg: ChatMessage): Promise<void> {
@@ -396,16 +398,12 @@ export async function recordChatMessage(msg: ChatMessage): Promise<void> {
     text: msg.text,
     timestamp: new Date(msg.timestamp),
   });
-
-  const list = chatByRide.get(msg.rideId) ?? [];
-  list.push(msg);
-  chatByRide.set(msg.rideId, list);
 }
 
-export function getRideParticipants(rideId: string): { clientId?: string; driverId?: string } {
-  const ride = rides.get(rideId);
-  if (!ride) return {};
-  return { clientId: ride.clientId, driverId: ride.driverId };
+export async function getRideParticipants(rideId: string): Promise<{ clientId?: string; driverId?: string }> {
+  const [ride] = await db.select({ clientId: dbRides.clientId, driverId: dbRides.driverId }).from(dbRides)
+    .where(eq(dbRides.id, rideId)).limit(1);
+  return ride ? { clientId: ride.clientId, driverId: ride.driverId ?? undefined } : {};
 }
 
 declare global {
@@ -1262,7 +1260,7 @@ router.post("/admin/reset-test-data", requireAdmin, resetDataLimiter, async (req
       res.status(403).json({ error: "A senha atual está incorreta." }); return;
     }
     const removedIds = await clearTestData(scope, clearPricing);
-    rides.clear(); chatByRide.clear();
+    rides.clear();
     for (const user of users.values()) { user.rating = 0; user.rideCount = 0; }
     for (const id of removedIds) users.delete(id);
     const removed = new Set(removedIds);
@@ -1554,7 +1552,7 @@ router.post("/accept-ride", requireAuth, async (req: Request, res: Response) => 
     return;
   }
 
-  const ride = rides.get(rideId);
+  const ride = await loadRide(rideId);
   if (!ride) { res.status(404).json({ error: "Ride not found" }); return; }
   if (ride.status !== "waiting") { res.status(409).json({ error: "Ride already taken" }); return; }
 
@@ -1650,7 +1648,7 @@ router.post("/start-ride", requireAuth, async (req: Request, res: Response) => {
     return;
   }
 
-  const ride = rides.get(rideId);
+  const ride = await loadRide(rideId);
   if (!ride) {
     res.status(404).json({ error: "Corrida não encontrada" });
     return;
@@ -1705,7 +1703,7 @@ router.post("/start-ride", requireAuth, async (req: Request, res: Response) => {
 // POST /finish-ride
 router.post("/finish-ride", requireAuth, async (req: Request, res: Response) => {
   const { rideId } = req.body as { rideId: string };
-  const ride = rides.get(rideId);
+  const ride = await loadRide(rideId);
   if (!ride) { res.status(404).json({ error: "Ride not found" }); return; }
   if (req.authUser!.mode !== "driver" || ride.driverId !== req.authUser!.id) {
     res.status(403).json({ error: "Acesso negado" });
@@ -1758,7 +1756,7 @@ router.post("/finish-ride", requireAuth, async (req: Request, res: Response) => 
 
 // POST /cancel-ride
 router.post("/cancel-ride", requireAuth, async (req: Request, res: Response) => {
-  const ride = rides.get(req.body.rideId);
+  const ride = await loadRide(req.body.rideId);
   if (!ride) { res.status(404).json({ error: "Ride not found" }); return; }
   if (ride.clientId !== req.authUser!.id && ride.driverId !== req.authUser!.id) {
     res.status(403).json({ error: "Acesso negado" });
@@ -1804,12 +1802,23 @@ router.post("/cancel-ride", requireAuth, async (req: Request, res: Response) => 
   res.json(rideForViewer(ride, req.authUser!));
 });
 
+// New apps page through chat; the existing array endpoint remains compatible.
+router.get('/rides/:id/chat/page', requireAuth, async (req: Request, res: Response) => {
+  let query;
+  try { query = parseChatPage(req.query); }
+  catch (error) { res.status(400).json({ error: (error as Error).message }); return; }
+  const page = await getChatPage(req.params.id as string, req.authUser!, query);
+  if ('error' in page) { res.status(page.status ?? 500).json({error:page.error}); return; }
+  res.set('Cache-Control','no-store');
+  res.json(page);
+});
+
 // GET /rides/:id/chat – recupera o histórico persistido no Neon.
 router.get("/rides/:id/chat", requireAuth, async (req: Request, res: Response) => {
   const rideId = req.params.id as string;
 
   try {
-    const [ride] = await db.select().from(dbRides)
+    const [ride] = await db.select({ clientId: dbRides.clientId, driverId: dbRides.driverId }).from(dbRides)
       .where(eq(dbRides.id, rideId)).limit(1);
 
     if (!ride) {
@@ -1840,7 +1849,6 @@ router.get("/rides/:id/chat", requireAuth, async (req: Request, res: Response) =
       timestamp: message.timestamp.toISOString(),
     }));
 
-    chatByRide.set(rideId, history);
     res.json(history);
   } catch (error) {
     console.error("[chat] Erro ao buscar histórico no Neon:");
